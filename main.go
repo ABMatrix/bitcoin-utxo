@@ -26,7 +26,7 @@ import (
 
 // Version
 const (
-	Version                     = "semi-manual-2"
+	Version                     = "semi-manual-3"
 	ENV_MONGO_URI               = "MONGO_URI"
 	ENV_MONGO_BITCOIN_DB_NAME   = "MONGO_UTXO_DB_NAME"
 	UTXO_COLLECTION_NAME_PREFIX = "utxo"
