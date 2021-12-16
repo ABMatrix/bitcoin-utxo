@@ -162,20 +162,17 @@ func main() {
 		db.Close()
 		os.Exit(-1)
 	}
-	var obfuscateKey []byte
-	copy(obfuscateKey, iter.Value())
+	obfuscateKey := iter.Value()
 	log.Println("found obfuscate key! ", obfuscateKey)
 
 	var count int64
 	var entries int64
 	var utxoBuf []*UTXO
-	var key []byte
-	var value []byte
 	for iter.First(); iter.Valid(); iter.Next() {
 		entries++
 
-		copy(key, iter.Key())
-		copy(value, iter.Value())
+		key := iter.Key()
+		value := iter.Value()
 
 		prefix := key[0]
 		if prefix == 14 {
