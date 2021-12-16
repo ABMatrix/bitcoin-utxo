@@ -26,7 +26,7 @@ import (
 
 // Version
 const (
-	Version                     = "debug"
+	Version                     = "test-1"
 	ENV_MONGO_URI               = "MONGO_URI"
 	ENV_MONGO_BITCOIN_DB_NAME   = "MONGO_UTXO_DB_NAME"
 	UTXO_COLLECTION_NAME_PREFIX = "utxo"
@@ -155,11 +155,16 @@ func main() {
 	utxoDB := mongoCli.Database(mongoDBName)
 	utxoCollection := utxoDB.Collection(utxoCollectionName)
 
-	// Declare obfuscateKey (a byte slice)
-	var obfuscateKey []byte
-	obfuscateKeyFound := false
+	// get obfuscate key (a byte slice)
+	if ok := iter.Seek([]byte{14}); !ok {
+		log.Println("cannot find any key with prefix 14")
+		iter.Release()
+		db.Close()
+		os.Exit(-1)
+	}
+	obfuscateKey := iter.Value()
+	log.Println("found obfuscate key! ", obfuscateKey)
 
-	var unprocessed []*Unprocessed
 	var count int64
 	var entries int64
 	var utxoBuf []*UTXO
@@ -170,45 +175,13 @@ func main() {
 		value := iter.Value()
 
 		prefix := key[0]
-		if prefix != 14 && prefix != 0x43 {
-			log.Printf("[warning] unexpected prefix: %x", prefix)
-			continue
-		}
-
-		if !obfuscateKeyFound {
-			log.Printf("[info] obfuscate key has not been set at entry: %d\n", entries)
-			unproc := &Unprocessed{
-				Key:   key,
-				Value: value,
-			}
-			unprocessed = append(unprocessed, unproc)
-			continue
-		}
-
 		if prefix == 14 {
-			obfuscateKey = value
-			log.Println("[info] obfuscate key: ", obfuscateKey)
-			log.Println("[info] total unprocessed: ", len(unprocessed))
-			obfuscateKeyFound = true
-			var buf []*UTXO
-			for _, unproc := range unprocessed {
-				utxo, err := processEachEntry(unproc.Key, unproc.Value, obfuscateKey, testnet)
-				if err != nil {
-					log.Printf("[error] failed to process (%+v, %+v) with error: %s\n", unproc.Key, unproc.Value, err.Error())
-					continue
-				}
-				scriptTypeCount[utxo.Type]++
-				if utxo.Type == NULLDATA {
-					// we don't want to insert unspendable coins
-					continue
-				}
-				count++
-				totalAmount += utxo.Amount
-				buf = append(buf, utxo)
-			}
-			if len(buf) > 0 {
-				insertUTXO(ctx, buf, utxoCollection)
-			}
+			log.Printf("[info] skipping obfuscate key entry")
+			continue
+		}
+
+		if prefix != 0x43 {
+			log.Printf("[warning] unexpected prefix: %x", prefix)
 			continue
 		}
 
