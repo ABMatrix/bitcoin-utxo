@@ -29,7 +29,7 @@ import (
 
 // Version
 const (
-	Version                     = "semi-manual-1"
+	Version                     = "semi-manual-2"
 	ENV_MONGO_URI               = "MONGO_URI"
 	ENV_MONGO_BITCOIN_DB_NAME   = "MONGO_UTXO_DB_NAME"
 	UTXO_COLLECTION_NAME_PREFIX = "utxo"
@@ -159,6 +159,7 @@ func main() {
 	// open leveldb without compression to avoid corrupting the database for bitcoin
 	opts := &opt.Options{
 		Compression: opt.NoCompression,
+		ReadOnly:    true,
 	}
 	// https://bitcoin.stackexchange.com/questions/52257/chainstate-leveldb-corruption-after-reading-from-the-database
 	// https://github.com/syndtr/goleveldb/issues/61
