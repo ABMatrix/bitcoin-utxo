@@ -26,7 +26,7 @@ import (
 
 // Version
 const (
-	Version                     = "test-1"
+	Version                     = "test-2"
 	ENV_MONGO_URI               = "MONGO_URI"
 	ENV_MONGO_BITCOIN_DB_NAME   = "MONGO_UTXO_DB_NAME"
 	UTXO_COLLECTION_NAME_PREFIX = "utxo"
@@ -198,6 +198,7 @@ func main() {
 		count++
 		totalAmount += utxo.Amount
 		if len(utxoBuf) == BUF_SIZE {
+			log.Println("[info] inside loop inserting")
 			insertUTXO(ctx, utxoBuf, utxoCollection)
 			utxoBuf = make([]*UTXO, 0)
 		}
@@ -205,6 +206,7 @@ func main() {
 	}
 
 	if len(utxoBuf) > 0 {
+		log.Println("[info] outside loop inserting")
 		insertUTXO(ctx, utxoBuf, utxoCollection)
 	}
 
