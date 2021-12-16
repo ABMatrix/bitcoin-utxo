@@ -1,6 +1,5 @@
 package main
 
-// local packages
 import (
 	"context"
 	"encoding/hex"
