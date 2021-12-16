@@ -409,24 +409,26 @@ func processEachEntry(key []byte, value []byte, obfuscateKey []byte, testnet boo
 			output.Type = SCRIPTHASH
 			output.Address = address
 			return output, nil
-		} else { // P2PK
-			// 2, 3, 4, 5
-			//  2 = P2PK 02publickey <- nsize makes up part of the public key in the actual script (e.g. 02publickey)
-			//  3 = P2PK 03publickey <- y is odd/even (0x02 = even, 0x03 = odd)
-			//  4 = P2PK 04publickey (uncompressed)  y = odd  <- actual script uses an uncompressed public key, but it is compressed when stored in this db
-			//  5 = P2PK 04publickey (uncompressed) y = even
-			// "The uncompressed pubkeys are compressed when they are added to the db. 0x04 and 0x05 are used to indicate that the key is supposed to be uncompressed and those indicate whether the y value is even or odd so that the full uncompressed key can be retrieved."
-			//
-			// if nsize is 4 or 5, you will need to uncompress the public key to get it's full form
-			// if nsize == 4 || nsize == 5 {
-			//     // uncompress (4 = y is even, 5 = y is odd)
-			//     script = decompress(script)
-			// }
-			output.Type = PUBKEY
-			// the script is also the pubkey
-			return output, nil
 		}
+
+		// P2PK
+		// 2, 3, 4, 5
+		//  2 = P2PK 02publickey <- nsize makes up part of the public key in the actual script (e.g. 02publickey)
+		//  3 = P2PK 03publickey <- y is odd/even (0x02 = even, 0x03 = odd)
+		//  4 = P2PK 04publickey (uncompressed)  y = odd  <- actual script uses an uncompressed public key, but it is compressed when stored in this db
+		//  5 = P2PK 04publickey (uncompressed) y = even
+		// "The uncompressed pubkeys are compressed when they are added to the db. 0x04 and 0x05 are used to indicate that the key is supposed to be uncompressed and those indicate whether the y value is even or odd so that the full uncompressed key can be retrieved."
+		//
+		// if nsize is 4 or 5, you will need to uncompress the public key to get it's full form
+		// if nsize == 4 || nsize == 5 {
+		//     // uncompress (4 = y is even, 5 = y is odd)
+		//     script = decompress(script)
+		// }
+		output.Type = PUBKEY
+		// the script is also the pubkey
+		return output, nil
 	}
+
 	if txscript.IsWitnessProgram(script) { // witness program
 		version := script[0]
 		if version > 0x50 {
