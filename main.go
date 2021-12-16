@@ -67,33 +67,6 @@ func main() {
 
 	ctx := context.Background()
 
-	// MongoDB version of API service
-	mongoURI := os.Getenv(ENV_MONGO_URI) // "mongodb://username@password:<ip>:port/"
-	if mongoURI == "" {
-		log.Fatalln("mongo URI is unset")
-	}
-
-	mongoDBName := os.Getenv(ENV_MONGO_BITCOIN_DB_NAME) // "bitcoin"
-	if mongoDBName == "" {
-		log.Fatalln("mongo db name is unset")
-	}
-
-	// initialize mongodb
-	clientOptions := options.Client().ApplyURI(mongoURI)
-
-	// connect to MongoDB
-	mongoCli, err := mongo.Connect(ctx, clientOptions)
-	if err != nil {
-		log.Fatalln("failed to connect with error:", err)
-	}
-	// check connection
-	err = mongoCli.Ping(ctx, nil)
-	if err != nil {
-		log.Fatalln("failed to ping mongodb with error: ", err)
-	}
-
-	log.Println("mongo connection is OK...")
-
 	// Mainnet or Testnet (for encoding addresses correctly)
 	testnet := false
 	utxoCollectionName := UTXO_COLLECTION_NAME_PREFIX + "-mainnet"
@@ -153,6 +126,32 @@ func main() {
 		os.Exit(0) // exit
 	}()
 
+	// MongoDB version of API service
+	mongoURI := os.Getenv(ENV_MONGO_URI) // "mongodb://username@password:<ip>:port/"
+	if mongoURI == "" {
+		log.Fatalln("mongo URI is unset")
+	}
+
+	mongoDBName := os.Getenv(ENV_MONGO_BITCOIN_DB_NAME) // "bitcoin"
+	if mongoDBName == "" {
+		log.Fatalln("mongo db name is unset")
+	}
+
+	// initialize mongodb
+	clientOptions := options.Client().ApplyURI(mongoURI)
+
+	// connect to MongoDB
+	mongoCli, err := mongo.Connect(ctx, clientOptions)
+	if err != nil {
+		log.Fatalln("failed to connect with error:", err)
+	}
+	// check connection
+	err = mongoCli.Ping(ctx, nil)
+	if err != nil {
+		log.Fatalln("failed to ping mongodb with error: ", err)
+	}
+
+	log.Println("mongo connection is OK...")
 	utxoDB := mongoCli.Database(mongoDBName)
 	utxoCollection := utxoDB.Collection(utxoCollectionName)
 
@@ -171,9 +170,6 @@ func main() {
 		value := iter.Value()
 
 		prefix := key[0]
-		log.Println("prefix: ", prefix)
-		continue
-
 		if prefix != 14 && prefix != 0x43 {
 			log.Printf("[warning] unexpected prefix: %x", prefix)
 			continue
