@@ -25,7 +25,7 @@ import (
 
 // Version
 const (
-	Version                     = "test-10"
+	Version                     = "test-11"
 	ENV_MONGO_URI               = "MONGO_URI"
 	ENV_MONGO_BITCOIN_DB_NAME   = "MONGO_UTXO_DB_NAME"
 	UTXO_COLLECTION_NAME_PREFIX = "utxo"
@@ -42,11 +42,6 @@ const (
 	WITNESS_UNKNOWN       string = "witness_unknown"
 	NULLDATA              string = "nulldata"
 )
-
-type Unprocessed struct {
-	Key   []byte
-	Value []byte
-}
 
 func main() {
 	// Set default chainstate LevelDB and output file
@@ -79,6 +74,7 @@ func main() {
 	opts := &opt.Options{
 		ErrorIfMissing: true,
 		Compression:    opt.NoCompression,
+		ReadOnly:       true,
 	}
 	// https://bitcoin.stackexchange.com/questions/52257/chainstate-leveldb-corruption-after-reading-from-the-database
 	// https://github.com/syndtr/goleveldb/issues/61
@@ -167,22 +163,13 @@ func main() {
 	var count int64
 	var entries int64
 	var utxoBuf []*UTXO
-	for iter.First(); iter.Valid(); iter.Next() {
+	for ok := iter.Seek([]byte{0x43}); ok; ok = iter.Next() {
 		entries++
 
-		key := iter.Key()
-		value := iter.Value()
-
-		prefix := key[0]
-		if prefix == 14 {
-			log.Printf("[info] skipping obfuscate key entry at %d\n", entries)
-			continue
-		}
-
-		if prefix != 0x43 {
-			log.Printf("[warning] unexpected prefix: %#x at %d\n", prefix, entries)
-			continue
-		}
+		key := make([]byte, len(iter.Key()))
+		copy(key, iter.Key())
+		value := make([]byte, len(iter.Value()))
+		copy(value, iter.Value())
 
 		utxo, err := processEachEntry(key, value, obfuscateKey, testnet)
 		if err != nil {
@@ -228,20 +215,8 @@ func main() {
 }
 
 func processEachEntry(key []byte, value []byte, obfuscateKey []byte, testnet bool) (*UTXO, error) {
-	if len(key) == 0 || len(value) == 0 || len(obfuscateKey) == 0 {
-		return nil, fmt.Errorf("none of key, value and obfuscate key should be empty")
-	}
-
 	// Output Fields - build output from flags passed in
 	output := &UTXO{} // we will add to this as we go through each utxo in the database
-
-	// first byte in key indicates the type of key we've got for leveldb
-	prefix := key[0]
-
-	// utxo entry
-	if prefix != 0x43 { // 67 = 0x43 = C = "utxo"
-		return nil, fmt.Errorf("[error] prefix is not 0x43")
-	}
 
 	// ---
 	// Key
