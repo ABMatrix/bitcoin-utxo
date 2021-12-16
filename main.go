@@ -26,7 +26,7 @@ import (
 
 // Version
 const (
-	Version                     = "semi-manual-5"
+	Version                     = "debug"
 	ENV_MONGO_URI               = "MONGO_URI"
 	ENV_MONGO_BITCOIN_DB_NAME   = "MONGO_UTXO_DB_NAME"
 	UTXO_COLLECTION_NAME_PREFIX = "utxo"
@@ -171,6 +171,9 @@ func main() {
 		value := iter.Value()
 
 		prefix := key[0]
+		log.Println("prefix: ", prefix)
+		continue
+
 		if prefix != 14 && prefix != 0x43 {
 			log.Printf("[warning] unexpected prefix: %x", prefix)
 			continue
