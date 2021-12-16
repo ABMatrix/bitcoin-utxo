@@ -26,7 +26,7 @@ import (
 
 // Version
 const (
-	Version                     = "test-3"
+	Version                     = "test-4"
 	ENV_MONGO_URI               = "MONGO_URI"
 	ENV_MONGO_BITCOIN_DB_NAME   = "MONGO_UTXO_DB_NAME"
 	UTXO_COLLECTION_NAME_PREFIX = "utxo"
@@ -165,18 +165,10 @@ func main() {
 	obfuscateKey := iter.Value()
 	log.Println("found obfuscate key! ", obfuscateKey)
 
-	iter.Release()
-	iter = db.NewIterator(nil, nil)
-	// NOTE: iter.Release() comes after the iteration (not deferred here)
-	if err := iter.Error(); err != nil {
-		fmt.Println("failed to iterate over level DB keys", err)
-		os.Exit(-1)
-	}
-
 	var count int64
 	var entries int64
 	var utxoBuf []*UTXO
-	for iter.Next() {
+	for iter.First(); iter.Valid(); iter.Next() {
 		entries++
 
 		key := iter.Key()
