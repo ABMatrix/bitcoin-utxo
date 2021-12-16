@@ -9,7 +9,6 @@ import (
 	"log"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 
 	"github.com/ABMatrix/bitcoin-utxo/bitcoin/bech32"
@@ -21,12 +20,11 @@ import (
 	"github.com/btcsuite/btcd/txscript"
 	"github.com/syndtr/goleveldb/leveldb"
 	"go.mongodb.org/mongo-driver/mongo"
-	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
 // Version
 const (
-	Version                     = "debug"
+	Version                     = "will be reverted"
 	ENV_MONGO_URI               = "MONGO_URI"
 	ENV_MONGO_BITCOIN_DB_NAME   = "MONGO_UTXO_DB_NAME"
 	UTXO_COLLECTION_NAME_PREFIX = "utxo"
@@ -55,7 +53,7 @@ func main() {
 
 	// Command Line Options (Flags)
 	chainstate := flag.String("db", defaultFolder, "Location of bitcoin chainstate db.") // chainstate folder
-	testnetFlag := flag.Bool("testnet", false, "Is the chainstate leveldb for testnet?") // true/false
+	//testnetFlag := flag.Bool("testnet", false, "Is the chainstate leveldb for testnet?") // true/false
 	version := flag.Bool("version", false, "Print version.")
 	flag.Parse() // execute command line parsing for all declared flags
 
@@ -65,15 +63,15 @@ func main() {
 		os.Exit(0)
 	}
 
-	ctx := context.Background()
-
-	// Mainnet or Testnet (for encoding addresses correctly)
-	testnet := false
-	utxoCollectionName := UTXO_COLLECTION_NAME_PREFIX + "-mainnet"
-	if *testnetFlag || strings.Contains(*chainstate, "testnet") { // check testnet flag
-		testnet = true
-		utxoCollectionName = UTXO_COLLECTION_NAME_PREFIX + "-testnet"
-	}
+	//ctx := context.Background()
+	//
+	//// Mainnet or Testnet (for encoding addresses correctly)
+	//testnet := false
+	//utxoCollectionName := UTXO_COLLECTION_NAME_PREFIX + "-mainnet"
+	//if *testnetFlag || strings.Contains(*chainstate, "testnet") { // check testnet flag
+	//	testnet = true
+	//	utxoCollectionName = UTXO_COLLECTION_NAME_PREFIX + "-testnet"
+	//}
 
 	// Select bitcoin chainstate leveldb folder
 	// open leveldb without compression to avoid corrupting the database for bitcoin
@@ -115,6 +113,14 @@ func main() {
 		os.Exit(-1)
 	}
 
+	if ok := iter.Seek([]byte{14}); !ok {
+		log.Println("cannot find any key with prefix 14")
+		iter.Release()
+		db.Close()
+		os.Exit(-1)
+	}
+	log.Println("found it! ", iter.Key(), '\t', iter.Value())
+
 	// Catch signals that interrupt the script so that we can close the database safely (hopefully not corrupting it)
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
@@ -125,122 +131,122 @@ func main() {
 		db.Close() // close database
 		os.Exit(0) // exit
 	}()
-
-	// MongoDB version of API service
-	mongoURI := os.Getenv(ENV_MONGO_URI) // "mongodb://username@password:<ip>:port/"
-	if mongoURI == "" {
-		log.Fatalln("mongo URI is unset")
-	}
-
-	mongoDBName := os.Getenv(ENV_MONGO_BITCOIN_DB_NAME) // "bitcoin"
-	if mongoDBName == "" {
-		log.Fatalln("mongo db name is unset")
-	}
-
-	// initialize mongodb
-	clientOptions := options.Client().ApplyURI(mongoURI)
-
-	// connect to MongoDB
-	mongoCli, err := mongo.Connect(ctx, clientOptions)
-	if err != nil {
-		log.Fatalln("failed to connect with error:", err)
-	}
-	// check connection
-	err = mongoCli.Ping(ctx, nil)
-	if err != nil {
-		log.Fatalln("failed to ping mongodb with error: ", err)
-	}
-
-	log.Println("mongo connection is OK...")
-	utxoDB := mongoCli.Database(mongoDBName)
-	utxoCollection := utxoDB.Collection(utxoCollectionName)
-
-	// Declare obfuscateKey (a byte slice)
-	var obfuscateKey []byte
-	obfuscateKeyFound := false
-
-	var unprocessed []*Unprocessed
-	var count int64
-	var entries int64
-	var utxoBuf []*UTXO
-	for iter.First(); iter.Valid(); iter.Next() {
-		entries++
-
-		key := iter.Key()
-		value := iter.Value()
-
-		prefix := key[0]
-		if prefix != 14 && prefix != 0x43 {
-			log.Printf("[warning] unexpected prefix: %x", prefix)
-			continue
-		}
-
-		if !obfuscateKeyFound {
-			log.Printf("[info] obfuscate key has not been set at entry: %d\n", entries)
-			unproc := &Unprocessed{
-				Key:   key,
-				Value: value,
-			}
-			unprocessed = append(unprocessed, unproc)
-			continue
-		}
-
-		if prefix == 14 {
-			obfuscateKey = value
-			log.Println("[info] obfuscate key: ", obfuscateKey)
-			log.Println("[info] total unprocessed: ", len(unprocessed))
-			obfuscateKeyFound = true
-			var buf []*UTXO
-			for _, unproc := range unprocessed {
-				utxo, err := processEachEntry(unproc.Key, unproc.Value, obfuscateKey, testnet)
-				if err != nil {
-					log.Printf("[error] failed to process (%+v, %+v) with error: %s\n", unproc.Key, unproc.Value, err.Error())
-					continue
-				}
-				scriptTypeCount[utxo.Type]++
-				if utxo.Type == NULLDATA {
-					// we don't want to insert unspendable coins
-					continue
-				}
-				count++
-				totalAmount += utxo.Amount
-				buf = append(buf, utxo)
-			}
-			if len(buf) > 0 {
-				insertUTXO(ctx, buf, utxoCollection)
-			}
-			continue
-		}
-
-		utxo, err := processEachEntry(key, value, obfuscateKey, testnet)
-		if err != nil {
-			log.Printf("[error] failed to process (%+v, %+v) with error: %s\n", key, value, err.Error())
-			continue
-		}
-		scriptTypeCount[utxo.Type]++
-		if utxo.Type == NULLDATA {
-			// we don't want to insert unspendable coins
-			continue
-		}
-		count++
-		totalAmount += utxo.Amount
-		if len(utxoBuf) == BUF_SIZE {
-			insertUTXO(ctx, utxoBuf, utxoCollection)
-			utxoBuf = make([]*UTXO, 0)
-		}
-		utxoBuf = append(utxoBuf, utxo)
-	}
-
-	if len(utxoBuf) > 0 {
-		insertUTXO(ctx, utxoBuf, utxoCollection)
-	}
+	//
+	//// MongoDB version of API service
+	//mongoURI := os.Getenv(ENV_MONGO_URI) // "mongodb://username@password:<ip>:port/"
+	//if mongoURI == "" {
+	//	log.Fatalln("mongo URI is unset")
+	//}
+	//
+	//mongoDBName := os.Getenv(ENV_MONGO_BITCOIN_DB_NAME) // "bitcoin"
+	//if mongoDBName == "" {
+	//	log.Fatalln("mongo db name is unset")
+	//}
+	//
+	//// initialize mongodb
+	//clientOptions := options.Client().ApplyURI(mongoURI)
+	//
+	//// connect to MongoDB
+	//mongoCli, err := mongo.Connect(ctx, clientOptions)
+	//if err != nil {
+	//	log.Fatalln("failed to connect with error:", err)
+	//}
+	//// check connection
+	//err = mongoCli.Ping(ctx, nil)
+	//if err != nil {
+	//	log.Fatalln("failed to ping mongodb with error: ", err)
+	//}
+	//
+	//log.Println("mongo connection is OK...")
+	//utxoDB := mongoCli.Database(mongoDBName)
+	//utxoCollection := utxoDB.Collection(utxoCollectionName)
+	//
+	//// Declare obfuscateKey (a byte slice)
+	//var obfuscateKey []byte
+	//obfuscateKeyFound := false
+	//
+	//var unprocessed []*Unprocessed
+	//var count int64
+	//var entries int64
+	//var utxoBuf []*UTXO
+	//for iter.First(); iter.Valid(); iter.Next() {
+	//	entries++
+	//
+	//	key := iter.Key()
+	//	value := iter.Value()
+	//
+	//	prefix := key[0]
+	//	if prefix != 14 && prefix != 0x43 {
+	//		log.Printf("[warning] unexpected prefix: %x", prefix)
+	//		continue
+	//	}
+	//
+	//	if !obfuscateKeyFound {
+	//		log.Printf("[info] obfuscate key has not been set at entry: %d\n", entries)
+	//		unproc := &Unprocessed{
+	//			Key:   key,
+	//			Value: value,
+	//		}
+	//		unprocessed = append(unprocessed, unproc)
+	//		continue
+	//	}
+	//
+	//	if prefix == 14 {
+	//		obfuscateKey = value
+	//		log.Println("[info] obfuscate key: ", obfuscateKey)
+	//		log.Println("[info] total unprocessed: ", len(unprocessed))
+	//		obfuscateKeyFound = true
+	//		var buf []*UTXO
+	//		for _, unproc := range unprocessed {
+	//			utxo, err := processEachEntry(unproc.Key, unproc.Value, obfuscateKey, testnet)
+	//			if err != nil {
+	//				log.Printf("[error] failed to process (%+v, %+v) with error: %s\n", unproc.Key, unproc.Value, err.Error())
+	//				continue
+	//			}
+	//			scriptTypeCount[utxo.Type]++
+	//			if utxo.Type == NULLDATA {
+	//				// we don't want to insert unspendable coins
+	//				continue
+	//			}
+	//			count++
+	//			totalAmount += utxo.Amount
+	//			buf = append(buf, utxo)
+	//		}
+	//		if len(buf) > 0 {
+	//			insertUTXO(ctx, buf, utxoCollection)
+	//		}
+	//		continue
+	//	}
+	//
+	//	utxo, err := processEachEntry(key, value, obfuscateKey, testnet)
+	//	if err != nil {
+	//		log.Printf("[error] failed to process (%+v, %+v) with error: %s\n", key, value, err.Error())
+	//		continue
+	//	}
+	//	scriptTypeCount[utxo.Type]++
+	//	if utxo.Type == NULLDATA {
+	//		// we don't want to insert unspendable coins
+	//		continue
+	//	}
+	//	count++
+	//	totalAmount += utxo.Amount
+	//	if len(utxoBuf) == BUF_SIZE {
+	//		insertUTXO(ctx, utxoBuf, utxoCollection)
+	//		utxoBuf = make([]*UTXO, 0)
+	//	}
+	//	utxoBuf = append(utxoBuf, utxo)
+	//}
+	//
+	//if len(utxoBuf) > 0 {
+	//	insertUTXO(ctx, utxoBuf, utxoCollection)
+	//}
 
 	iter.Release() // Do not defer this, want to release iterator before closing database
 
 	// Final Report
 	// ---------------------
-	log.Printf("Total entries in leveldb: %d\n", entries)
-	log.Printf("Total spendable UTXOs: %d\n", count)
+	//log.Printf("Total entries in leveldb: %d\n", entries)
+	//log.Printf("Total spendable UTXOs: %d\n", count)
 
 	// Can only show total btc amount if we have requested to get the amount for each entry with the -f fields flag
 	log.Printf("Total BTC:   %.8f\n", float64(totalAmount)/1e8) // convert satoshis to BTC (float with 8 decimal places)
