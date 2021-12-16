@@ -170,6 +170,7 @@ func main() {
 	var utxoBuf []*UTXO
 	for iter.First(); iter.Valid(); iter.Next() {
 		entries++
+		continue
 
 		key := iter.Key()
 		value := iter.Value()
