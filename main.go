@@ -26,7 +26,7 @@ import (
 
 // Version
 const (
-	Version                     = "test-4"
+	Version                     = "test-5"
 	ENV_MONGO_URI               = "MONGO_URI"
 	ENV_MONGO_BITCOIN_DB_NAME   = "MONGO_UTXO_DB_NAME"
 	UTXO_COLLECTION_NAME_PREFIX = "utxo"
@@ -170,7 +170,6 @@ func main() {
 	var utxoBuf []*UTXO
 	for iter.First(); iter.Valid(); iter.Next() {
 		entries++
-		continue
 
 		key := iter.Key()
 		value := iter.Value()
