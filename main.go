@@ -182,9 +182,9 @@ func main() {
 
 		if prefix != 0x43 {
 			log.Printf("[warning] unexpected prefix: %#x at %d\n", prefix, entries)
+			continue
 		}
 
-		continue
 		utxo, err := processEachEntry(key, value, obfuscateKey, testnet)
 		if err != nil {
 			log.Printf("[error] failed to process (%+v, %+v) with error: %s\n", key, value, err.Error())
