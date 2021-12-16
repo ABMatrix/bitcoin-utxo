@@ -176,12 +176,12 @@ func main() {
 
 		prefix := key[0]
 		if prefix == 14 {
-			log.Printf("[info] skipping obfuscate key entry")
+			log.Printf("[info] skipping obfuscate key entry at %d\n", entries)
 			continue
 		}
 
 		if prefix != 0x43 {
-			log.Printf("[warning] unexpected prefix: %x", prefix)
+			log.Printf("[warning] unexpected prefix: %#x\n", prefix)
 			continue
 		}
 
