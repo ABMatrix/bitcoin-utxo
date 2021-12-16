@@ -186,6 +186,7 @@ func main() {
 		}
 
 		utxo, err := processEachEntry(key, value, obfuscateKey, testnet)
+		continue
 		if err != nil {
 			log.Printf("[error] failed to process (%+v, %+v) with error: %s\n", key, value, err.Error())
 			continue
