@@ -13,7 +13,6 @@ import (
 	"os/signal"
 	"runtime"
 	"strings"
-	"sync"
 	"syscall"
 
 	"github.com/ABMatrix/bitcoin-utxo/bitcoin/bech32"
@@ -34,7 +33,7 @@ const (
 	ENV_MONGO_URI               = "MONGO_URI"
 	ENV_MONGO_BITCOIN_DB_NAME   = "MONGO_UTXO_DB_NAME"
 	UTXO_COLLECTION_NAME_PREFIX = "utxo"
-	BUF_SIZE                    = 1024
+	BUF_SIZE                    = 1 << 20
 
 	NONSTANDARD           string = "nonstandard"
 	PUBKEY                string = "pubkey"
@@ -48,8 +47,7 @@ const (
 	NULLDATA              string = "nulldata"
 )
 
-func insertUTXO(ctx context.Context, buf []UTXO, wg *sync.WaitGroup, totalProcessedSoFar int64, utxoCollection *mongo.Collection) {
-	defer wg.Done()
+func insertUTXO(ctx context.Context, buf []UTXO, totalProcessedSoFar int64, utxoCollection *mongo.Collection) {
 	log.Printf("%d utxos processed\n", totalProcessedSoFar) // Show progress at intervals.
 	// convert to mongo-acceptable arguments...
 	var docs []interface{}
@@ -215,8 +213,7 @@ func main() {
 
 	utxoBuf := make([]UTXO, BUF_SIZE)
 	utxoSet := make(map[string]struct{})
-	var i int64
-	wg := &sync.WaitGroup{}
+	var count int64
 	for iter.Next() {
 		// Output Fields - build output from flags passed in
 		output := UTXO{} // we will add to this as we go through each utxo in the database
@@ -233,7 +230,7 @@ func main() {
 		}
 
 		// utxo entry
-		if prefix == 67 { // 67 = 0x43 = C = "utxo"
+		if prefix == 0x43 { // 67 = 0x43 = C = "utxo"
 
 			// ---
 			// Key
@@ -242,23 +239,23 @@ func main() {
 			//      430000155b9869d56c66d9e86e3c01de38e3892a42b99949fe109ac034fff6583900
 			//      <><--------------------------------------------------------------><>
 			//      /                               |                                  \
-			//  type                          txid (little-endian)                      index (varint)
+			//  type                          txid (little-endian)                      vout (varint)
 
 			// txid
-			txidLE := key[1:33] // little-endian byte order
+			txid := key[1:33] // little-endian byte order
+			lenTxid := len(txid)
 
 			// txid - reverse byte order
-			txid := make([]byte, 0)                 // create empty byte slice (dont want to mess with txid directly)
-			for i := len(txidLE) - 1; i >= 0; i-- { // run backwards through the txid slice
-				txid = append(txid, txidLE[i]) // append each byte to the new byte slice
+			for i := 0; i < lenTxid/2; i++ { // run backwards through the txid slice
+				txid[i], txid[lenTxid-1-i] = txid[lenTxid-1-i], txid[i] // append each byte to the new byte slice
 			}
 			output.TxID = hex.EncodeToString(txid) // add to output results map
 
 			// vout
-			index := key[33:]
+			vout := key[33:]
 
-			// convert varint128 index to an integer
-			output.Vout = btcleveldb.Varint128Decode(index)
+			// convert varint128 vout to an integer
+			output.Vout = btcleveldb.Varint128Decode(vout)
 
 			uniqueKey := fmt.Sprintf("%s-%d", output.TxID, output.Vout)
 			if _, ok := utxoSet[uniqueKey]; ok {
@@ -266,6 +263,7 @@ func main() {
 				continue
 			}
 			utxoSet[uniqueKey] = struct{}{}
+			output.ID = uniqueKey
 
 			// -----
 			// Value
@@ -277,7 +275,7 @@ func main() {
 			obfuscateKeyExtended := obfuscateKey[1:] // ignore the first byte, as that just tells you the size of the obfuscateKey
 
 			// Extend the obfuscateKey so it's the same length as the value
-			for i, k := len(obfuscateKeyExtended), 0; len(obfuscateKeyExtended) < len(value); i, k = i+1, k+1 {
+			for k := 0; len(obfuscateKeyExtended) < len(value); k++ {
 				// append each byte of obfuscateKey to the end until it's the same length as the value
 				obfuscateKeyExtended = append(obfuscateKeyExtended, obfuscateKeyExtended[k])
 				// Example
@@ -288,9 +286,8 @@ func main() {
 
 			// XOR the value with the obfuscateKey (xor each byte) to de-obfuscate the value
 			var xor []byte // create a byte slice to hold the xor results
-			for i := range value {
-				result := value[i] ^ obfuscateKeyExtended[i]
-				xor = append(xor, result)
+			for i, b := range value {
+				xor = append(xor, b^obfuscateKeyExtended[i])
 			}
 
 			// -----
@@ -436,6 +433,9 @@ func main() {
 				}
 			} else if txscript.IsWitnessProgram(script) { // witness program
 				version := script[0]
+				if version > 0x50 {
+					version -= 0x50
+				}
 				program := script[2:]
 
 				// bech32 function takes an int array and not a byte array, so convert the array to integers
@@ -450,24 +450,21 @@ func main() {
 					address, _ = bech32.SegwitAddrEncode("bc", int(version), programint) // hrp (string), version (int), program ([]int)
 				}
 
-				if nsize == 28 && script[0] == 0 && script[1] == 20 { // P2WPKH (script type is 28, which means length of script is 22 bytes)
+				if nsize == 28 && version == 0 && script[1] == 20 { // P2WPKH (script type is 28, which means length of script is 22 bytes)
 					scriptType = WITNESS_V0_KEYHASH
 					scriptTypeCount[WITNESS_V0_KEYHASH]++
-				} else if nsize == 40 && script[0] == 0 && script[1] == 32 { // P2WSH (script type is 40, which means length of script is 34 bytes)
+				} else if nsize == 40 && version == 0 && script[1] == 32 { // P2WSH (script type is 40, which means length of script is 34 bytes)
 					scriptType = WITNESS_V0_SCRIPTHASH
 					scriptTypeCount[WITNESS_V0_SCRIPTHASH]++
-				} else if nsize == 40 && script[0] == 0x51 && script[1] == 32 { // P2TR
+				} else if nsize == 40 && version == 1 && script[1] == 32 { // P2TR
 					scriptType = WITNESS_V1_TAPROOT
 					scriptTypeCount[WITNESS_V1_TAPROOT]++
 				} else { // P2W?
 					scriptType = WITNESS_UNKNOWN
 					scriptTypeCount[WITNESS_UNKNOWN]++
 				}
-			}
-
-			// Non-Standard (if the script type hasn't been identified and set then it remains as an unknown "non-standard" script)
-			if scriptType == "non-standard" {
-				scriptTypeCount["non-standard"]++
+			} else {
+				scriptTypeCount[NONSTANDARD]++
 			}
 
 			// add address and script type to results map
@@ -480,35 +477,30 @@ func main() {
 
 			// Print Results
 			// -------------
-			if i > 0 && i%BUF_SIZE == 0 {
-				wg.Add(1)
-				go insertUTXO(ctx, utxoBuf, wg, i, utxoCollection)
+			if count > 0 && count%BUF_SIZE == 0 {
+				insertUTXO(ctx, utxoBuf, count, utxoCollection)
 			}
 
 			// Write to File
 			// -------------
 			// Write to buffer (use bufio for faster writes)
-			utxoBuf[i%BUF_SIZE] = output
+			utxoBuf[count%BUF_SIZE] = output
 
 			// Increment Count
-			i++
+			count++
 		}
 	}
 
-	wg.Add(1)
-
-	go insertUTXO(ctx, utxoBuf[:i%BUF_SIZE], wg, i, utxoCollection)
+	insertUTXO(ctx, utxoBuf[:count%BUF_SIZE], count, utxoCollection)
 
 	iter.Release() // Do not defer this, want to release iterator before closing database
 
-	wg.Wait()
-
 	// Final Progress Report
 	// ---------------------
-	log.Printf("Total spendable UTXOs: %d\n", i)
+	log.Printf("Total spendable UTXOs: %d\n", count)
 
 	// Can only show total btc amount if we have requested to get the amount for each entry with the -f fields flag
-	log.Printf("Total BTC:   %.8f\n", float64(totalAmount)/float64(100000000)) // convert satoshis to BTC (float with 8 decimal places)
+	log.Printf("Total BTC:   %.8f\n", float64(totalAmount)/1e8) // convert satoshis to BTC (float with 8 decimal places)
 
 	// Can only show script type stats if we have requested to get the script type for each entry with the -f fields flag
 	log.Println("Script Types:")
