@@ -26,7 +26,7 @@ import (
 
 // Version
 const (
-	Version                     = "semi-manual-3"
+	Version                     = "semi-manual-4"
 	ENV_MONGO_URI               = "MONGO_URI"
 	ENV_MONGO_BITCOIN_DB_NAME   = "MONGO_UTXO_DB_NAME"
 	UTXO_COLLECTION_NAME_PREFIX = "utxo"
@@ -106,7 +106,7 @@ func main() {
 	// open leveldb without compression to avoid corrupting the database for bitcoin
 	opts := &opt.Options{
 		ErrorIfMissing: true,
-		ReadOnly:       true,
+		Compression:    opt.NoCompression,
 	}
 	// https://bitcoin.stackexchange.com/questions/52257/chainstate-leveldb-corruption-after-reading-from-the-database
 	// https://github.com/syndtr/goleveldb/issues/61
@@ -164,7 +164,7 @@ func main() {
 	var count int64
 	var entries int64
 	var utxoBuf []*UTXO
-	for iter.Next() {
+	for iter.First(); iter.Valid(); iter.Next() {
 		entries++
 
 		key := iter.Key()
@@ -172,11 +172,12 @@ func main() {
 
 		prefix := key[0]
 		if prefix != 14 && prefix != 0x43 {
-			log.Println("[warning] unexpected prefix: ", prefix)
+			log.Printf("[warning] unexpected prefix: %x", prefix)
 			continue
 		}
 
 		if !obfuscateKeyFound {
+			log.Printf("[info] obfuscate key has not been set at entry: %d", entries)
 			unproc := &Unprocessed{
 				Key:   key,
 				Value: value,
@@ -206,7 +207,9 @@ func main() {
 				totalAmount += utxo.Amount
 				buf = append(buf, utxo)
 			}
-			insertUTXO(ctx, buf, utxoCollection)
+			if len(buf) > 0 {
+				insertUTXO(ctx, buf, utxoCollection)
+			}
 			continue
 		}
 
