@@ -180,8 +180,6 @@ func main() {
 			continue
 		}
 
-		break
-
 		if prefix != 0x43 {
 			log.Printf("[warning] unexpected prefix: %#x\n", prefix)
 			continue
