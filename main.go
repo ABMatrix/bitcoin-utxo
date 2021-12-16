@@ -212,7 +212,6 @@ func main() {
 	utxoCollection := utxoDB.Collection(utxoCollectionName)
 
 	utxoBuf := make([]UTXO, BUF_SIZE)
-	utxoSet := make(map[string]struct{})
 	var count int64
 	for iter.Next() {
 		// Output Fields - build output from flags passed in
@@ -258,11 +257,6 @@ func main() {
 			output.Vout = btcleveldb.Varint128Decode(vout)
 
 			uniqueKey := fmt.Sprintf("%s-%d", output.TxID, output.Vout)
-			if _, ok := utxoSet[uniqueKey]; ok {
-				log.Printf("[warning] %s already exists\n", uniqueKey)
-				continue
-			}
-			utxoSet[uniqueKey] = struct{}{}
 			output.ID = uniqueKey
 
 			// -----
