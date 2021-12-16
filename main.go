@@ -30,7 +30,7 @@ const (
 	ENV_MONGO_URI               = "MONGO_URI"
 	ENV_MONGO_BITCOIN_DB_NAME   = "MONGO_UTXO_DB_NAME"
 	UTXO_COLLECTION_NAME_PREFIX = "utxo"
-	BUF_SIZE                    = 1000000
+	BUF_SIZE                    = 1 << 13
 
 	NONSTANDARD           string = "nonstandard"
 	PUBKEY                string = "pubkey"
@@ -94,7 +94,7 @@ func main() {
 
 	// Stats - keep track of interesting stats as we read through leveldb.
 	var totalAmount int64 = 0 // total amount of satoshis
-	scriptTypeCount := map[string]int{
+	scriptTypeCount := map[string]int64{
 		NONSTANDARD:           0,
 		PUBKEY:                0,
 		PUBKEYHASH:            0,
@@ -195,14 +195,15 @@ func main() {
 			// we don't want to insert unspendable coins
 			continue
 		}
-		count++
 		totalAmount += utxo.Amount
+		utxoBuf = append(utxoBuf, utxo)
+		count++
 		if len(utxoBuf) == BUF_SIZE {
 			log.Println("[info] inside loop inserting")
 			insertUTXO(ctx, utxoBuf, utxoCollection)
 			utxoBuf = make([]*UTXO, 0)
+			log.Printf("[info] processed %d so far\n", count)
 		}
-		utxoBuf = append(utxoBuf, utxo)
 	}
 
 	if len(utxoBuf) > 0 {
