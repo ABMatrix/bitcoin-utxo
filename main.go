@@ -26,7 +26,7 @@ import (
 
 // Version
 const (
-	Version                     = "semi-manual-4"
+	Version                     = "semi-manual-5"
 	ENV_MONGO_URI               = "MONGO_URI"
 	ENV_MONGO_BITCOIN_DB_NAME   = "MONGO_UTXO_DB_NAME"
 	UTXO_COLLECTION_NAME_PREFIX = "utxo"
@@ -158,7 +158,7 @@ func main() {
 
 	// Declare obfuscateKey (a byte slice)
 	var obfuscateKey []byte
-	var obfuscateKeyFound bool
+	obfuscateKeyFound := false
 
 	var unprocessed []*Unprocessed
 	var count int64
@@ -177,7 +177,7 @@ func main() {
 		}
 
 		if !obfuscateKeyFound {
-			log.Printf("[info] obfuscate key has not been set at entry: %d", entries)
+			log.Printf("[info] obfuscate key has not been set at entry: %d\n", entries)
 			unproc := &Unprocessed{
 				Key:   key,
 				Value: value,
