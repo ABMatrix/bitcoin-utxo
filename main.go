@@ -25,11 +25,11 @@ import (
 
 // Version
 const (
-	Version                     = "beta-3"
+	Version                     = "beta-4"
 	ENV_MONGO_URI               = "MONGO_URI"
 	ENV_MONGO_BITCOIN_DB_NAME   = "MONGO_UTXO_DB_NAME"
 	UTXO_COLLECTION_NAME_PREFIX = "utxo"
-	BUF_SIZE                    = 1 << 13
+	BUF_SIZE                    = 1 << 15
 )
 
 func main() {
@@ -450,6 +450,8 @@ func insertUTXO(ctx context.Context, buf []*UTXO, utxoCollection *mongo.Collecti
 	_, err := utxoCollection.InsertMany(ctx, docs)
 	if err != nil {
 		log.Println("[error] failed to insert many with error: ", err.Error())
+		// exit immediately should any error occurs to release system resources
+		syscall.Kill(syscall.Getpid(), syscall.SIGTERM)
 		return
 	}
 	log.Printf("[info] finished inserting %d utxos\n", len(buf))
