@@ -5,7 +5,6 @@ go 1.17
 require (
 	github.com/akamensky/base58 v0.0.0-20210829145138-ce8bf8802e8f
 	github.com/btcsuite/btcd v0.22.0-beta.0.20211214150552-a1f43e4d846e
-	github.com/google/uuid v1.3.0
 	github.com/syndtr/goleveldb v1.0.1-0.20210819022825-2ae1ddf74ef7
 	go.mongodb.org/mongo-driver v1.8.0
 	golang.org/x/crypto v0.0.0-20211209193657-4570a0811e8b

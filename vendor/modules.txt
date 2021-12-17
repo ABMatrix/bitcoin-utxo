@@ -22,9 +22,6 @@ github.com/go-stack/stack
 # github.com/golang/snappy v0.0.4
 ## explicit
 github.com/golang/snappy
-# github.com/google/uuid v1.3.0
-## explicit
-github.com/google/uuid
 # github.com/klauspost/compress v1.13.6
 ## explicit; go 1.15
 github.com/klauspost/compress

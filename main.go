@@ -17,7 +17,6 @@ import (
 	"github.com/ABMatrix/bitcoin-utxo/bitcoin/keys"
 
 	"github.com/btcsuite/btcd/txscript"
-	"github.com/google/uuid"
 	"github.com/syndtr/goleveldb/leveldb"
 	"github.com/syndtr/goleveldb/leveldb/opt"
 	"go.mongodb.org/mongo-driver/mongo"
@@ -30,10 +29,8 @@ const (
 	ENV_MONGO_URI               = "MONGO_URI"
 	ENV_MONGO_BITCOIN_DB_NAME   = "MONGO_UTXO_DB_NAME"
 	UTXO_COLLECTION_NAME_PREFIX = "utxo"
-	BUF_SIZE                    = 1 << 20
+	BUF_SIZE                    = 1 << 13
 )
-
-var lock *sync.Mutex // mutex on utxo collection to avoid socket disconnection from mongo sever
 
 func main() {
 	// Set default chainstate LevelDB and output file
@@ -156,7 +153,6 @@ func main() {
 	var entries int64
 	var utxoBuf []*UTXO
 	wg := &sync.WaitGroup{}
-	lock = &sync.Mutex{}
 	for ok := iter.Seek([]byte{0x43}); ok; ok = iter.Next() {
 		entries++
 
@@ -445,16 +441,12 @@ func processEachEntry(key []byte, value []byte, obfuscateKey []byte, testnet boo
 
 func insertUTXO(ctx context.Context, buf []*UTXO, utxoCollection *mongo.Collection, wg *sync.WaitGroup) {
 	defer wg.Done()
-	goroutineId := uuid.NewString()
-	log.Printf("[info] in goroutine %s inserting %d utxo...\n", goroutineId, len(buf))
+	log.Printf("[info] inserting %d utxo...\n", len(buf))
 	// convert to mongo-acceptable arguments...
 	var docs []interface{}
 	for _, utxo := range buf {
 		docs = append(docs, utxo)
 	}
-	lock.Lock()
-	log.Printf("[info] goroutine %s obtained mutex\n", goroutineId)
-	defer lock.Unlock()
 	_, err := utxoCollection.InsertMany(ctx, docs)
 	if err != nil {
 		log.Println("[error] failed to insert many with error: ", err.Error())
