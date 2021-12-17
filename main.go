@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"syscall"
 
 	"github.com/ABMatrix/bitcoin-utxo/bitcoin/bech32"
@@ -25,7 +26,7 @@ import (
 
 // Version
 const (
-	Version                     = "test-11"
+	Version                     = "beta-1"
 	ENV_MONGO_URI               = "MONGO_URI"
 	ENV_MONGO_BITCOIN_DB_NAME   = "MONGO_UTXO_DB_NAME"
 	UTXO_COLLECTION_NAME_PREFIX = "utxo"
@@ -163,6 +164,7 @@ func main() {
 	var count int64
 	var entries int64
 	var utxoBuf []*UTXO
+	wg := &sync.WaitGroup{}
 	for ok := iter.Seek([]byte{0x43}); ok; ok = iter.Next() {
 		entries++
 
@@ -185,17 +187,20 @@ func main() {
 		utxoBuf = append(utxoBuf, utxo)
 		count++
 		if len(utxoBuf) == BUF_SIZE {
-			log.Println("[info] inside loop inserting")
-			insertUTXO(ctx, utxoBuf, utxoCollection)
+			buf := make([]*UTXO, BUF_SIZE)
+			copy(buf, utxoBuf)
 			utxoBuf = make([]*UTXO, 0)
-			log.Printf("[info] processed %d so far\n", count)
+			wg.Add(1)
+			go insertUTXO(ctx, buf, utxoCollection, wg)
 		}
 	}
 
 	if len(utxoBuf) > 0 {
-		log.Println("[info] outside loop inserting")
-		insertUTXO(ctx, utxoBuf, utxoCollection)
+		wg.Add(1)
+		go insertUTXO(ctx, utxoBuf, utxoCollection, wg)
 	}
+
+	wg.Wait()
 
 	iter.Release() // Do not defer this, want to release iterator before closing database
 
@@ -447,7 +452,8 @@ func processEachEntry(key []byte, value []byte, obfuscateKey []byte, testnet boo
 	return output, nil
 }
 
-func insertUTXO(ctx context.Context, buf []*UTXO, utxoCollection *mongo.Collection) {
+func insertUTXO(ctx context.Context, buf []*UTXO, utxoCollection *mongo.Collection, wg *sync.WaitGroup) {
+	defer wg.Done()
 	log.Printf("[info] inserting %d utxo...\n", len(buf))
 	// convert to mongo-acceptable arguments...
 	var docs []interface{}
