@@ -26,7 +26,7 @@ import (
 
 // Version
 const (
-	Version                     = "beta-1"
+	Version                     = "beta-2"
 	ENV_MONGO_URI               = "MONGO_URI"
 	ENV_MONGO_BITCOIN_DB_NAME   = "MONGO_UTXO_DB_NAME"
 	UTXO_COLLECTION_NAME_PREFIX = "utxo"
@@ -43,6 +43,8 @@ const (
 	WITNESS_UNKNOWN       string = "witness_unknown"
 	NULLDATA              string = "nulldata"
 )
+
+var lock *sync.Mutex
 
 func main() {
 	// Set default chainstate LevelDB and output file
@@ -165,6 +167,7 @@ func main() {
 	var entries int64
 	var utxoBuf []*UTXO
 	wg := &sync.WaitGroup{}
+	lock = &sync.Mutex{}
 	for ok := iter.Seek([]byte{0x43}); ok; ok = iter.Next() {
 		entries++
 
@@ -460,6 +463,8 @@ func insertUTXO(ctx context.Context, buf []*UTXO, utxoCollection *mongo.Collecti
 	for _, utxo := range buf {
 		docs = append(docs, utxo)
 	}
+	lock.Lock()
+	defer lock.Unlock()
 	_, err := utxoCollection.InsertMany(ctx, docs)
 	if err != nil {
 		log.Println("failed to insert many with error: ", err.Error())
