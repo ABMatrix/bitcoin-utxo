@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/ABMatrix/bitcoin-utxo/bitcoin/bech32"
 	"github.com/ABMatrix/bitcoin-utxo/bitcoin/btcleveldb"
@@ -25,11 +26,13 @@ import (
 
 // Version
 const (
-	Version                     = "beta-4"
+	Version                     = "beta-5"
 	ENV_MONGO_URI               = "MONGO_URI"
 	ENV_MONGO_BITCOIN_DB_NAME   = "MONGO_UTXO_DB_NAME"
 	UTXO_COLLECTION_NAME_PREFIX = "utxo"
 	BUF_SIZE                    = 1 << 15
+	RETRY_INTERVAL              = 5 * time.Second
+	MAX_RETRIES                 = 5
 )
 
 func main() {
@@ -99,17 +102,6 @@ func main() {
 		os.Exit(-1)
 	}
 
-	// Catch signals that interrupt the script so that we can close the database safely (hopefully not corrupting it)
-	c := make(chan os.Signal, 1)
-	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
-	go func() { // goroutine
-		<-c // receive from channel
-		log.Println("Interrupt signal caught. Shutting down gracefully.")
-		// iter.Release() // release database iterator
-		db.Close() // close database
-		os.Exit(0) // exit
-	}()
-
 	// MongoDB version of API service
 	mongoURI := os.Getenv(ENV_MONGO_URI) // "mongodb://username@password:<ip>:port/"
 	if mongoURI == "" {
@@ -138,6 +130,18 @@ func main() {
 	log.Println("[info] mongo connection is OK...")
 	utxoDB := mongoCli.Database(mongoDBName)
 	utxoCollection := utxoDB.Collection(utxoCollectionName)
+
+	// Catch signals that interrupt the script so that we can close the database safely (hopefully not corrupting it)
+	c := make(chan os.Signal, 1)
+	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
+	go func() { // goroutine
+		<-c // receive from channel
+		log.Println("Interrupt signal caught. Shutting down gracefully.")
+		// iter.Release() // release database iterator
+		db.Close()               // close database
+		utxoCollection.Drop(ctx) // drop collection
+		os.Exit(0)               // exit
+	}()
 
 	// get obfuscate key (a byte slice)
 	if ok := iter.Seek([]byte{14}); !ok {
@@ -447,10 +451,17 @@ func insertUTXO(ctx context.Context, buf []*UTXO, utxoCollection *mongo.Collecti
 	for _, utxo := range buf {
 		docs = append(docs, utxo)
 	}
-	_, err := utxoCollection.InsertMany(ctx, docs)
-	if err != nil {
+	var err error
+
+	retried := 0
+	for _, err = utxoCollection.InsertMany(ctx, docs); err != nil && retried < MAX_RETRIES; _, err = utxoCollection.InsertMany(ctx, docs) {
+		retried++
 		log.Println("[error] failed to insert many with error: ", err.Error())
-		// exit immediately should any error occurs to release system resources
+		log.Printf("[info] start retrying at attempt #%d in %s\n", retried, RETRY_INTERVAL.String())
+		time.Sleep(RETRY_INTERVAL)
+	}
+	if err != nil && retried >= MAX_RETRIES {
+		log.Println("[error] max retries reached, giving up now...")
 		syscall.Kill(syscall.Getpid(), syscall.SIGTERM)
 		return
 	}
