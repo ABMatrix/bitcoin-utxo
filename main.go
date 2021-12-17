@@ -13,20 +13,20 @@ import (
 	"syscall"
 
 	"github.com/ABMatrix/bitcoin-utxo/bitcoin/bech32"
-
-	"github.com/syndtr/goleveldb/leveldb/opt"
-
 	"github.com/ABMatrix/bitcoin-utxo/bitcoin/btcleveldb"
 	"github.com/ABMatrix/bitcoin-utxo/bitcoin/keys"
+
 	"github.com/btcsuite/btcd/txscript"
+	"github.com/google/uuid"
 	"github.com/syndtr/goleveldb/leveldb"
+	"github.com/syndtr/goleveldb/leveldb/opt"
 	"go.mongodb.org/mongo-driver/mongo"
 	"go.mongodb.org/mongo-driver/mongo/options"
 )
 
 // Version
 const (
-	Version                     = "beta-2"
+	Version                     = "beta-3"
 	ENV_MONGO_URI               = "MONGO_URI"
 	ENV_MONGO_BITCOIN_DB_NAME   = "MONGO_UTXO_DB_NAME"
 	UTXO_COLLECTION_NAME_PREFIX = "utxo"
@@ -44,7 +44,7 @@ const (
 	NULLDATA              string = "nulldata"
 )
 
-var lock *sync.Mutex
+var lock *sync.Mutex // mutex on utxo collection to avoid socket disconnection from mongo sever
 
 func main() {
 	// Set default chainstate LevelDB and output file
@@ -85,7 +85,7 @@ func main() {
 
 	db, err := leveldb.OpenFile(*chainstate, opts) // You have got to dereference the pointer to get the actual value
 	if err != nil {
-		log.Println("Couldn't open LevelDB with error: ", err.Error())
+		log.Println("[error] failed to open LevelDB with error: ", err.Error())
 		return
 	}
 	defer db.Close()
@@ -109,7 +109,7 @@ func main() {
 	iter := db.NewIterator(nil, nil)
 	// NOTE: iter.Release() comes after the iteration (not deferred here)
 	if err := iter.Error(); err != nil {
-		fmt.Println("failed to iterate over level DB keys", err)
+		fmt.Println("[fatal] failed to iterate over level DB keys", err)
 		os.Exit(-1)
 	}
 
@@ -127,12 +127,12 @@ func main() {
 	// MongoDB version of API service
 	mongoURI := os.Getenv(ENV_MONGO_URI) // "mongodb://username@password:<ip>:port/"
 	if mongoURI == "" {
-		log.Fatalln("mongo URI is unset")
+		log.Fatalln("[fatal] mongo URI is unset")
 	}
 
 	mongoDBName := os.Getenv(ENV_MONGO_BITCOIN_DB_NAME) // "bitcoin"
 	if mongoDBName == "" {
-		log.Fatalln("mongo db name is unset")
+		log.Fatalln("[fatal] mongo db name is unset")
 	}
 
 	// initialize mongodb
@@ -141,27 +141,27 @@ func main() {
 	// connect to MongoDB
 	mongoCli, err := mongo.Connect(ctx, clientOptions)
 	if err != nil {
-		log.Fatalln("failed to connect with error:", err)
+		log.Fatalln("[fatal] failed to connect with error:", err)
 	}
 	// check connection
 	err = mongoCli.Ping(ctx, nil)
 	if err != nil {
-		log.Fatalln("failed to ping mongodb with error: ", err)
+		log.Fatalln("[fatal] failed to ping mongodb with error: ", err)
 	}
 
-	log.Println("mongo connection is OK...")
+	log.Println("[info] mongo connection is OK...")
 	utxoDB := mongoCli.Database(mongoDBName)
 	utxoCollection := utxoDB.Collection(utxoCollectionName)
 
 	// get obfuscate key (a byte slice)
 	if ok := iter.Seek([]byte{14}); !ok {
-		log.Println("cannot find any key with prefix 14")
+		log.Println("[fatal] cannot find any key with prefix 14")
 		iter.Release()
 		db.Close()
 		os.Exit(-1)
 	}
 	obfuscateKey := iter.Value()
-	log.Println("found obfuscate key! ", obfuscateKey)
+	log.Println("[info] obfuscate key: ", obfuscateKey)
 
 	var count int64
 	var entries int64
@@ -197,6 +197,7 @@ func main() {
 			go insertUTXO(ctx, buf, utxoCollection, wg)
 		}
 	}
+	iter.Release() // Do not defer this, want to release iterator before closing database
 
 	if len(utxoBuf) > 0 {
 		wg.Add(1)
@@ -205,18 +206,16 @@ func main() {
 
 	wg.Wait()
 
-	iter.Release() // Do not defer this, want to release iterator before closing database
-
 	// Final Report
 	// ---------------------
-	log.Printf("Total entries in leveldb: %d\n", entries)
-	log.Printf("Total spendable UTXOs: %d\n", count)
+	log.Printf("[summary] Total entries in leveldb: %d\n", entries)
+	log.Printf("[summary] Total spendable UTXOs: %d\n", count)
 
 	// Can only show total btc amount if we have requested to get the amount for each entry with the -f fields flag
-	log.Printf("Total BTC:   %.8f\n", float64(totalAmount)/1e8) // convert satoshis to BTC (float with 8 decimal places)
+	log.Printf("[summary] Total BTC:   %.8f\n", float64(totalAmount)/1e8) // convert satoshis to BTC (float with 8 decimal places)
 
 	// Can only show script type stats if we have requested to get the script type for each entry with the -f fields flag
-	log.Println("Script Types:")
+	log.Println("[summary] Script Types:")
 	for k, v := range scriptTypeCount {
 		log.Printf(" %-12s %d\n", k, v) // %-12s = left-justify padding
 	}
@@ -457,16 +456,20 @@ func processEachEntry(key []byte, value []byte, obfuscateKey []byte, testnet boo
 
 func insertUTXO(ctx context.Context, buf []*UTXO, utxoCollection *mongo.Collection, wg *sync.WaitGroup) {
 	defer wg.Done()
-	log.Printf("[info] inserting %d utxo...\n", len(buf))
+	goroutineId := uuid.NewString()
+	log.Printf("[info] in goroutine %s inserting %d utxo...\n", goroutineId, len(buf))
 	// convert to mongo-acceptable arguments...
 	var docs []interface{}
 	for _, utxo := range buf {
 		docs = append(docs, utxo)
 	}
 	lock.Lock()
+	log.Printf("[info] goroutine %s obtained mutex\n", goroutineId)
 	defer lock.Unlock()
 	_, err := utxoCollection.InsertMany(ctx, docs)
 	if err != nil {
-		log.Println("failed to insert many with error: ", err.Error())
+		log.Println("[error] failed to insert many with error: ", err.Error())
+		return
 	}
+	log.Printf("[info] finished inserting %d utxos\n", len(buf))
 }
