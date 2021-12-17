@@ -26,13 +26,13 @@ import (
 
 // Version
 const (
-	Version                     = "beta-5"
+	Version                     = "beta-6"
 	ENV_MONGO_URI               = "MONGO_URI"
 	ENV_MONGO_BITCOIN_DB_NAME   = "MONGO_UTXO_DB_NAME"
 	UTXO_COLLECTION_NAME_PREFIX = "utxo"
-	BUF_SIZE                    = 1 << 15
-	RETRY_INTERVAL              = 5 * time.Second
-	MAX_RETRIES                 = 5
+	BUF_SIZE                    = 1 << 20
+	RETRY_INTERVAL              = 10 * time.Second
+	MAX_RETRIES                 = 10
 )
 
 func main() {
