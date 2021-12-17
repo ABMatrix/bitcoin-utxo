@@ -6,10 +6,10 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"math"
 	"os"
 	"os/signal"
 	"strings"
-	"sync"
 	"syscall"
 	"time"
 
@@ -26,13 +26,13 @@ import (
 
 // Version
 const (
-	Version                     = "beta-6"
+	Version                     = "beta-7"
 	ENV_MONGO_URI               = "MONGO_URI"
 	ENV_MONGO_BITCOIN_DB_NAME   = "MONGO_UTXO_DB_NAME"
 	UTXO_COLLECTION_NAME_PREFIX = "utxo"
 	BUF_SIZE                    = 1 << 20
 	RETRY_INTERVAL              = 10 * time.Second
-	MAX_RETRIES                 = 10
+	MAX_RETRIES                 = 5
 )
 
 func main() {
@@ -156,7 +156,6 @@ func main() {
 	var count int64
 	var entries int64
 	var utxoBuf []*UTXO
-	wg := &sync.WaitGroup{}
 	for ok := iter.Seek([]byte{0x43}); ok; ok = iter.Next() {
 		entries++
 
@@ -178,22 +177,14 @@ func main() {
 		totalAmount += utxo.Amount
 		utxoBuf = append(utxoBuf, utxo)
 		count++
-		if len(utxoBuf) == BUF_SIZE {
-			buf := make([]*UTXO, BUF_SIZE)
-			copy(buf, utxoBuf)
-			utxoBuf = make([]*UTXO, 0)
-			wg.Add(1)
-			go insertUTXO(ctx, buf, utxoCollection, wg)
-		}
 	}
 	iter.Release() // Do not defer this, want to release iterator before closing database
 
-	if len(utxoBuf) > 0 {
-		wg.Add(1)
-		go insertUTXO(ctx, utxoBuf, utxoCollection, wg)
+	for len(utxoBuf) > 0 {
+		size := int(math.Min(float64(len(utxoBuf)), float64(BUF_SIZE)))
+		insertUTXO(ctx, utxoBuf[:size], utxoCollection)
+		utxoBuf = utxoBuf[size:]
 	}
-
-	wg.Wait()
 
 	// Final Report
 	// ---------------------
@@ -443,8 +434,7 @@ func processEachEntry(key []byte, value []byte, obfuscateKey []byte, testnet boo
 	return output, nil
 }
 
-func insertUTXO(ctx context.Context, buf []*UTXO, utxoCollection *mongo.Collection, wg *sync.WaitGroup) {
-	defer wg.Done()
+func insertUTXO(ctx context.Context, buf []*UTXO, utxoCollection *mongo.Collection) {
 	log.Printf("[info] inserting %d utxo...\n", len(buf))
 	// convert to mongo-acceptable arguments...
 	var docs []interface{}
@@ -463,6 +453,7 @@ func insertUTXO(ctx context.Context, buf []*UTXO, utxoCollection *mongo.Collecti
 	if err != nil && retried >= MAX_RETRIES {
 		log.Println("[error] max retries reached, giving up now...")
 		syscall.Kill(syscall.Getpid(), syscall.SIGTERM)
+		time.Sleep(time.Second)
 		return
 	}
 	log.Printf("[info] finished inserting %d utxos\n", len(buf))
