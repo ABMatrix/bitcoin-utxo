@@ -31,17 +31,6 @@ const (
 	ENV_MONGO_BITCOIN_DB_NAME   = "MONGO_UTXO_DB_NAME"
 	UTXO_COLLECTION_NAME_PREFIX = "utxo"
 	BUF_SIZE                    = 1 << 20
-
-	NONSTANDARD           string = "nonstandard"
-	PUBKEY                string = "pubkey"
-	PUBKEYHASH            string = "pubkeyhash"
-	SCRIPTHASH            string = "scripthash"
-	MULTISIG              string = "multisig"
-	WITNESS_V0_KEYHASH    string = "witness_v0_keyhash"
-	WITNESS_V0_SCRIPTHASH string = "witness_v0_scripthash"
-	WITNESS_V1_TAPROOT    string = "witness_v1_taproot"
-	WITNESS_UNKNOWN       string = "witness_unknown"
-	NULLDATA              string = "nulldata"
 )
 
 var lock *sync.Mutex // mutex on utxo collection to avoid socket disconnection from mongo sever
