@@ -11,6 +11,7 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+	"time"
 
 	"github.com/ABMatrix/bitcoin-utxo/bitcoin/bech32"
 	"github.com/ABMatrix/bitcoin-utxo/bitcoin/btcleveldb"
@@ -25,17 +26,12 @@ import (
 
 // Version
 const (
-	Version                     = "beta-8"
+	Version                     = "beta-9"
 	ENV_MONGO_URI               = "MONGO_URI"
 	ENV_MONGO_BITCOIN_DB_NAME   = "MONGO_UTXO_DB_NAME"
 	UTXO_COLLECTION_NAME_PREFIX = "utxo"
 	BUF_SIZE                    = 1 << 20
-)
-
-var (
-	utxoCollectionName string
-	mongoDBName        string
-	mongoCli           *mongo.Client
+	TIME_FOR_MONGO_RECONNECTION = 45 * time.Second // 45 seconds for mongo to reconnect
 )
 
 func main() {
@@ -58,7 +54,7 @@ func main() {
 
 	// Mainnet or Testnet (for encoding addresses correctly)
 	testnet := false
-	utxoCollectionName = UTXO_COLLECTION_NAME_PREFIX + "-mainnet"
+	utxoCollectionName := UTXO_COLLECTION_NAME_PREFIX + "-mainnet"
 	if *testnetFlag || strings.Contains(*chainstate, "testnet") { // check testnet flag
 		testnet = true
 		utxoCollectionName = UTXO_COLLECTION_NAME_PREFIX + "-testnet"
@@ -111,7 +107,7 @@ func main() {
 		log.Fatalln("[fatal] mongo URI is unset")
 	}
 
-	mongoDBName = os.Getenv(ENV_MONGO_BITCOIN_DB_NAME) // "bitcoin"
+	mongoDBName := os.Getenv(ENV_MONGO_BITCOIN_DB_NAME) // "bitcoin"
 	if mongoDBName == "" {
 		log.Fatalln("[fatal] mongo db name is unset")
 	}
@@ -120,7 +116,7 @@ func main() {
 	clientOptions := options.Client().ApplyURI(mongoURI)
 
 	// connect to MongoDB
-	mongoCli, err = mongo.Connect(ctx, clientOptions)
+	mongoCli, err := mongo.Connect(ctx, clientOptions)
 	if err != nil {
 		log.Fatalln("[fatal] failed to connect with error:", err)
 	}
@@ -132,6 +128,7 @@ func main() {
 	}
 
 	log.Println("[info] mongo connection is OK...")
+	utxoCollection := mongoCli.Database(mongoDBName).Collection(utxoCollectionName)
 
 	// Catch signals that interrupt the script so that we can close the database safely (hopefully not corrupting it)
 	c := make(chan os.Signal, 1)
@@ -184,7 +181,7 @@ func main() {
 			}
 			utxoBuf = make([]*UTXO, 0)
 			wg.Add(1)
-			go insertUTXO(ctx, docs, wg)
+			go insertUTXO(ctx, docs, wg, utxoCollection, mongoCli)
 		}
 		utxoBuf = append(utxoBuf, utxo)
 		count++
@@ -197,7 +194,7 @@ func main() {
 			docs = append(docs, utxo)
 		}
 		wg.Add(1)
-		go insertUTXO(ctx, docs, wg)
+		go insertUTXO(ctx, docs, wg, utxoCollection, mongoCli)
 	}
 
 	wg.Wait()
@@ -450,7 +447,7 @@ func processEachEntry(key []byte, value []byte, obfuscateKey []byte, testnet boo
 	return output, nil
 }
 
-func insertUTXO(ctx context.Context, docs []interface{}, wg *sync.WaitGroup) {
+func insertUTXO(ctx context.Context, docs []interface{}, wg *sync.WaitGroup, utxoCollection *mongo.Collection, mongoCli *mongo.Client) {
 	defer wg.Done()
 
 	if err := mongoCli.UseSession(ctx, func(sessionContext mongo.SessionContext) (err error) {
@@ -462,12 +459,16 @@ func insertUTXO(ctx context.Context, docs []interface{}, wg *sync.WaitGroup) {
 
 		log.Printf("[info] inserting %d utxo...\n", len(docs))
 
-		if _, err = mongoCli.Database(mongoDBName).Collection(utxoCollectionName).InsertMany(ctx, docs); err != nil {
+		for _, err = utxoCollection.InsertMany(sessionContext, docs); err != nil; _, err = utxoCollection.InsertMany(sessionContext, docs) {
 			log.Println("[error] failed to insert many with error: ", err.Error())
 			if e := sessionContext.AbortTransaction(sessionContext); e != nil {
 				log.Println("[error] failed to abort transaction with error: ", e.Error())
+				return err
 			}
-			return err
+			if !mongo.IsNetworkError(err) {
+				return err
+			}
+			time.Sleep(TIME_FOR_MONGO_RECONNECTION) // the network failure will resolve itself in some time
 		}
 
 		if err = sessionContext.CommitTransaction(ctx); err != nil {
