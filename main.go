@@ -6,6 +6,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"math"
 	"os"
 	"os/signal"
 	"strings"
@@ -26,11 +27,11 @@ import (
 
 // Version
 const (
-	Version                     = "beta-10.4"
+	Version                     = "beta-10.5"
 	ENV_MONGO_URI               = "MONGO_URI"
 	ENV_MONGO_BITCOIN_DB_NAME   = "MONGO_UTXO_DB_NAME"
 	UTXO_COLLECTION_NAME_PREFIX = "utxo"
-	BUF_SIZE                    = 1 << 15
+	BATCH_SIZE                  = 1 << 15
 	MAX_JOBS                    = 8
 )
 
@@ -160,15 +161,28 @@ func main() {
 	log.Println("[info] obfuscate key: ", obfuscateKey)
 
 	var count int64
-	var entries int64
 	var utxoBuf []*UTXO
 	docsChan := make(chan []interface{}, MAX_JOBS)
-	resultsChan := make(chan struct{}, MAX_JOBS)
 	totalJobs := 0
+	for ok := iter.Seek([]byte{0x43}); ok; ok = iter.Next() {
+		totalJobs++
+	}
+	totalJobs = int(math.Ceil(float64(totalJobs) / float64(BATCH_SIZE)))
+	resultsChan := make(chan struct{}, totalJobs)
 	for workerID := 1; workerID <= MAX_JOBS; workerID++ {
 		go worker(ctx, workerID, docsChan, resultsChan)
 	}
+	var entries int64
 	for ok := iter.Seek([]byte{0x43}); ok; ok = iter.Next() {
+		if entries > 0 && entries%BATCH_SIZE == 0 {
+			// convert to mongo-acceptable arguments...
+			var docs []interface{}
+			for _, utxo := range utxoBuf {
+				docs = append(docs, utxo)
+			}
+			utxoBuf = make([]*UTXO, 0)
+			docsChan <- docs
+		}
 		entries++
 
 		key, value := make([]byte, len(iter.Key())), make([]byte, len(iter.Value()))
@@ -186,23 +200,12 @@ func main() {
 			continue
 		}
 		totalAmount += utxo.Amount
-		if len(utxoBuf) == BUF_SIZE {
-			totalJobs++
-			// convert to mongo-acceptable arguments...
-			var docs []interface{}
-			for _, utxo := range utxoBuf {
-				docs = append(docs, utxo)
-			}
-			utxoBuf = make([]*UTXO, 0)
-			docsChan <- docs
-		}
 		utxoBuf = append(utxoBuf, utxo)
 		count++
 	}
 	iter.Release() // Do not defer this, want to release iterator before closing database
 
-	if len(utxoBuf) > 0 {
-		totalJobs++
+	{
 		// convert to mongo-acceptable arguments...
 		var docs []interface{}
 		for _, utxo := range utxoBuf {
@@ -235,14 +238,19 @@ func main() {
 
 func worker(ctx context.Context, id int, docsChan chan []interface{}, results chan<- struct{}) {
 	for docs := range docsChan {
-		fmt.Println("[info] worker", id)
+		fmt.Println("[info] worker", id, "started")
+		if len(docs) <= 0 {
+			fmt.Println("worker", id, "finished with nothing to do")
+			results <- EmptyStruct
+			continue
+		}
 		err := insertUTXOToMongo(ctx, docs)
 		if err != nil {
 			log.Printf("[error] worker %d failed to insert many with error: %s\n", id, err.Error())
 			docsChan <- docs // if failed, put the docs back to the channel
 			continue
 		}
-		fmt.Println("worker", id, "successfully finished")
+		fmt.Println("worker", id, "successfully finished an insert-many task")
 		results <- EmptyStruct
 	}
 }
