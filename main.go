@@ -26,7 +26,7 @@ import (
 
 // Version
 const (
-	Version                     = "beta-10"
+	Version                     = "beta-10.1"
 	ENV_MONGO_URI               = "MONGO_URI"
 	ENV_MONGO_BITCOIN_DB_NAME   = "MONGO_UTXO_DB_NAME"
 	UTXO_COLLECTION_NAME_PREFIX = "utxo"
@@ -464,7 +464,7 @@ func insertUTXO(ctx context.Context, docs []interface{}, wg *sync.WaitGroup) {
 
 		log.Printf("[info] inserting %d utxo...\n", len(docs))
 
-		for _, err = utxoCollection.InsertMany(sessionContext, docs); err != nil; _, err = utxoCollection.InsertMany(sessionContext, docs) {
+		for _, err = utxoCollection.InsertMany(ctx, docs); err != nil; _, err = utxoCollection.InsertMany(ctx, docs) {
 			log.Println("[error] failed to insert many with error: ", err.Error())
 			if e := sessionContext.AbortTransaction(sessionContext); e != nil {
 				log.Println("[error] failed to abort transaction with error: ", e.Error())
