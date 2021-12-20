@@ -13,6 +13,8 @@ import (
 	"syscall"
 	"time"
 
+	"go.mongodb.org/mongo-driver/mongo/writeconcern"
+
 	"github.com/ABMatrix/bitcoin-utxo/bitcoin/bech32"
 	"github.com/ABMatrix/bitcoin-utxo/bitcoin/btcleveldb"
 	"github.com/ABMatrix/bitcoin-utxo/bitcoin/keys"
@@ -26,12 +28,12 @@ import (
 
 // Version
 const (
-	Version                     = "beta-10.1"
+	Version                     = "beta-10.2"
 	ENV_MONGO_URI               = "MONGO_URI"
 	ENV_MONGO_BITCOIN_DB_NAME   = "MONGO_UTXO_DB_NAME"
 	UTXO_COLLECTION_NAME_PREFIX = "utxo"
 	BUF_SIZE                    = 1 << 15
-	TIME_FOR_MONGO_RECONNECTION = 45 * time.Second // 45 seconds for mongo to reconnect
+	RETRY_INTERVAL              = 45 * time.Second // 45 seconds for mongo to reconnect
 )
 
 var (
@@ -133,7 +135,9 @@ func main() {
 	}
 
 	log.Println("[info] mongo connection is OK...")
-	utxoCollection = mongoCli.Database(mongoDBName).Collection(utxoCollectionName)
+	wcMajority := writeconcern.New(writeconcern.WMajority())
+	wcMajorityCollectionOpts := options.Collection().SetWriteConcern(wcMajority)
+	utxoCollection = mongoCli.Database(mongoDBName).Collection(utxoCollectionName, wcMajorityCollectionOpts)
 
 	// Catch signals that interrupt the script so that we can close the database safely (hopefully not corrupting it)
 	c := make(chan os.Signal, 1)
@@ -186,7 +190,18 @@ func main() {
 			}
 			utxoBuf = make([]*UTXO, 0)
 			wg.Add(1)
-			go insertUTXO(ctx, docs, wg)
+			go func() {
+				defer wg.Done()
+				for {
+					err := insertUTXOToMongo(ctx, docs)
+					if err == nil {
+						return
+					}
+					log.Println("[error] failed to insert utxos to mongodb with error: ", err.Error())
+					log.Println("[info] retry in ", RETRY_INTERVAL.String())
+					time.Sleep(RETRY_INTERVAL)
+				}
+			}()
 		}
 		utxoBuf = append(utxoBuf, utxo)
 		count++
@@ -199,7 +214,18 @@ func main() {
 			docs = append(docs, utxo)
 		}
 		wg.Add(1)
-		go insertUTXO(ctx, docs, wg)
+		go func() {
+			defer wg.Done()
+			for {
+				err := insertUTXOToMongo(ctx, docs)
+				if err == nil {
+					return
+				}
+				log.Println("[error] failed to insert utxos to mongodb with error: ", err.Error())
+				log.Println("[info] retry in ", RETRY_INTERVAL.String())
+				time.Sleep(RETRY_INTERVAL)
+			}
+		}()
 	}
 
 	wg.Wait()
@@ -452,38 +478,18 @@ func processEachEntry(key []byte, value []byte, obfuscateKey []byte, testnet boo
 	return output, nil
 }
 
-func insertUTXO(ctx context.Context, docs []interface{}, wg *sync.WaitGroup) {
-	defer wg.Done()
-
-	if err := mongoCli.UseSession(ctx, func(sessionContext mongo.SessionContext) (err error) {
-		if err = sessionContext.StartTransaction(); err != nil {
-			log.Println("[error] failed to start transaction with error: ", err.Error())
-			return err
-		}
-		defer sessionContext.EndSession(ctx)
-
-		log.Printf("[info] inserting %d utxo...\n", len(docs))
-
-		for _, err = utxoCollection.InsertMany(ctx, docs); err != nil; _, err = utxoCollection.InsertMany(ctx, docs) {
-			log.Println("[error] failed to insert many with error: ", err.Error())
-			if e := sessionContext.AbortTransaction(sessionContext); e != nil {
-				log.Println("[error] failed to abort transaction with error: ", e.Error())
-				return err
-			}
-			if !mongo.IsNetworkError(err) {
-				return err
-			}
-			time.Sleep(TIME_FOR_MONGO_RECONNECTION) // the network failure will resolve itself in some time
-		}
-
-		if err = sessionContext.CommitTransaction(ctx); err != nil {
-			log.Println("[error] failed to commit transaction with error: ", err.Error())
-			return err
-		}
-		log.Printf("[info] successfully finished inserting %d utxos\n", len(docs))
-		return nil
-	}); err != nil {
-		log.Println("[error] failed to use session with error: ", err.Error())
-		return
+func insertUTXOToMongo(ctx context.Context, docs []interface{}) error {
+	session, err := mongoCli.StartSession()
+	if err != nil {
+		log.Println("[fatal] failed to start a new session with error: ", err.Error(), " now quitting")
+		syscall.Kill(os.Getpid(), syscall.SIGTERM)
+		return err
 	}
+	defer session.EndSession(ctx)
+
+	_, err = session.WithTransaction(ctx, func(sessionContext mongo.SessionContext) (interface{}, error) {
+		log.Printf("[info] inserting %d utxo...\n", len(docs))
+		return utxoCollection.InsertMany(sessionContext, docs)
+	})
+	return err
 }
