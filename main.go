@@ -9,9 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
-	"sync"
 	"syscall"
-	"time"
 
 	"go.mongodb.org/mongo-driver/mongo/writeconcern"
 
@@ -28,17 +26,18 @@ import (
 
 // Version
 const (
-	Version                     = "beta-10.3"
+	Version                     = "beta-10.4"
 	ENV_MONGO_URI               = "MONGO_URI"
 	ENV_MONGO_BITCOIN_DB_NAME   = "MONGO_UTXO_DB_NAME"
 	UTXO_COLLECTION_NAME_PREFIX = "utxo"
 	BUF_SIZE                    = 1 << 15
-	RETRY_INTERVAL              = 45 * time.Second // 45 seconds for mongo to reconnect
+	MAX_JOBS                    = 8
 )
 
 var (
 	mongoCli       *mongo.Client
 	utxoCollection *mongo.Collection
+	EmptyStruct    struct{}
 )
 
 func main() {
@@ -163,7 +162,12 @@ func main() {
 	var count int64
 	var entries int64
 	var utxoBuf []*UTXO
-	wg := &sync.WaitGroup{}
+	docsChan := make(chan []interface{}, MAX_JOBS)
+	resultsChan := make(chan struct{}, MAX_JOBS)
+	totalJobs := 0
+	for workerID := 1; workerID <= MAX_JOBS; workerID++ {
+		go worker(ctx, workerID, docsChan, resultsChan)
+	}
 	for ok := iter.Seek([]byte{0x43}); ok; ok = iter.Next() {
 		entries++
 
@@ -183,26 +187,14 @@ func main() {
 		}
 		totalAmount += utxo.Amount
 		if len(utxoBuf) == BUF_SIZE {
+			totalJobs++
 			// convert to mongo-acceptable arguments...
 			var docs []interface{}
 			for _, utxo := range utxoBuf {
 				docs = append(docs, utxo)
 			}
 			utxoBuf = make([]*UTXO, 0)
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				for {
-					err := insertUTXOToMongo(ctx, docs)
-					if err == nil {
-						log.Printf("[info] successfully inserted %d utxo...\n", len(docs))
-						return
-					}
-					log.Println("[error] failed to insert utxos to mongodb with error: ", err.Error())
-					log.Println("[info] retry in ", RETRY_INTERVAL.String())
-					time.Sleep(RETRY_INTERVAL)
-				}
-			}()
+			docsChan <- docs
 		}
 		utxoBuf = append(utxoBuf, utxo)
 		count++
@@ -210,27 +202,21 @@ func main() {
 	iter.Release() // Do not defer this, want to release iterator before closing database
 
 	if len(utxoBuf) > 0 {
+		totalJobs++
+		// convert to mongo-acceptable arguments...
 		var docs []interface{}
 		for _, utxo := range utxoBuf {
 			docs = append(docs, utxo)
 		}
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for {
-				err := insertUTXOToMongo(ctx, docs)
-				if err == nil {
-					log.Printf("[info] successfully inserted %d utxo...\n", len(docs))
-					return
-				}
-				log.Println("[error] failed to insert utxos to mongodb with error: ", err.Error())
-				log.Println("[info] retry in ", RETRY_INTERVAL.String())
-				time.Sleep(RETRY_INTERVAL)
-			}
-		}()
+		utxoBuf = make([]*UTXO, 0)
+		docsChan <- docs
 	}
+	close(docsChan)
 
-	wg.Wait()
+	for i := 0; i < totalJobs; i++ {
+		<-resultsChan
+	}
+	close(resultsChan)
 
 	// Final Report
 	// ---------------------
@@ -244,6 +230,20 @@ func main() {
 	log.Println("[summary] Script Types:")
 	for k, v := range scriptTypeCount {
 		log.Printf(" %-12s %d\n", k, v) // %-12s = left-justify padding
+	}
+}
+
+func worker(ctx context.Context, id int, docsChan chan []interface{}, results chan<- struct{}) {
+	for docs := range docsChan {
+		fmt.Println("[info] worker", id)
+		err := insertUTXOToMongo(ctx, docs)
+		if err != nil {
+			log.Printf("[error] worker %d failed to insert many with error: %s\n", id, err.Error())
+			docsChan <- docs // if failed, put the docs back to the channel
+			continue
+		}
+		fmt.Println("worker", id, "successfully finished")
+		results <- EmptyStruct
 	}
 }
 
