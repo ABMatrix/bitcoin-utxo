@@ -26,12 +26,17 @@ import (
 
 // Version
 const (
-	Version                     = "beta-9"
+	Version                     = "beta-10"
 	ENV_MONGO_URI               = "MONGO_URI"
 	ENV_MONGO_BITCOIN_DB_NAME   = "MONGO_UTXO_DB_NAME"
 	UTXO_COLLECTION_NAME_PREFIX = "utxo"
-	BUF_SIZE                    = 1 << 20
+	BUF_SIZE                    = 1 << 15
 	TIME_FOR_MONGO_RECONNECTION = 45 * time.Second // 45 seconds for mongo to reconnect
+)
+
+var (
+	mongoCli       *mongo.Client
+	utxoCollection *mongo.Collection
 )
 
 func main() {
@@ -116,7 +121,7 @@ func main() {
 	clientOptions := options.Client().ApplyURI(mongoURI)
 
 	// connect to MongoDB
-	mongoCli, err := mongo.Connect(ctx, clientOptions)
+	mongoCli, err = mongo.Connect(ctx, clientOptions)
 	if err != nil {
 		log.Fatalln("[fatal] failed to connect with error:", err)
 	}
@@ -128,7 +133,7 @@ func main() {
 	}
 
 	log.Println("[info] mongo connection is OK...")
-	utxoCollection := mongoCli.Database(mongoDBName).Collection(utxoCollectionName)
+	utxoCollection = mongoCli.Database(mongoDBName).Collection(utxoCollectionName)
 
 	// Catch signals that interrupt the script so that we can close the database safely (hopefully not corrupting it)
 	c := make(chan os.Signal, 1)
@@ -181,7 +186,7 @@ func main() {
 			}
 			utxoBuf = make([]*UTXO, 0)
 			wg.Add(1)
-			go insertUTXO(ctx, docs, wg, utxoCollection, mongoCli)
+			go insertUTXO(ctx, docs, wg)
 		}
 		utxoBuf = append(utxoBuf, utxo)
 		count++
@@ -194,7 +199,7 @@ func main() {
 			docs = append(docs, utxo)
 		}
 		wg.Add(1)
-		go insertUTXO(ctx, docs, wg, utxoCollection, mongoCli)
+		go insertUTXO(ctx, docs, wg)
 	}
 
 	wg.Wait()
@@ -447,7 +452,7 @@ func processEachEntry(key []byte, value []byte, obfuscateKey []byte, testnet boo
 	return output, nil
 }
 
-func insertUTXO(ctx context.Context, docs []interface{}, wg *sync.WaitGroup, utxoCollection *mongo.Collection, mongoCli *mongo.Client) {
+func insertUTXO(ctx context.Context, docs []interface{}, wg *sync.WaitGroup) {
 	defer wg.Done()
 
 	if err := mongoCli.UseSession(ctx, func(sessionContext mongo.SessionContext) (err error) {
