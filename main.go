@@ -27,7 +27,7 @@ import (
 
 // Version
 const (
-	Version                     = "beta-10.5"
+	Version                     = "beta-10.6"
 	ENV_MONGO_URI               = "MONGO_URI"
 	ENV_MONGO_BITCOIN_DB_NAME   = "MONGO_UTXO_DB_NAME"
 	UTXO_COLLECTION_NAME_PREFIX = "utxo"
@@ -214,11 +214,11 @@ func main() {
 		utxoBuf = make([]*UTXO, 0)
 		docsChan <- docs
 	}
-	close(docsChan)
 
 	for i := 0; i < totalJobs; i++ {
 		<-resultsChan
 	}
+	close(docsChan)
 	close(resultsChan)
 
 	// Final Report
