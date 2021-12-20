@@ -27,7 +27,7 @@ import (
 
 // Version
 const (
-	Version                     = "beta-10.6"
+	Version                     = "beta-10.7"
 	ENV_MONGO_URI               = "MONGO_URI"
 	ENV_MONGO_BITCOIN_DB_NAME   = "MONGO_UTXO_DB_NAME"
 	UTXO_COLLECTION_NAME_PREFIX = "utxo"
@@ -38,7 +38,6 @@ const (
 var (
 	mongoCli       *mongo.Client
 	utxoCollection *mongo.Collection
-	EmptyStruct    struct{}
 )
 
 func main() {
@@ -168,7 +167,7 @@ func main() {
 		totalJobs++
 	}
 	totalJobs = int(math.Ceil(float64(totalJobs) / float64(BATCH_SIZE)))
-	resultsChan := make(chan struct{}, totalJobs)
+	resultsChan := make(chan int, totalJobs)
 	for workerID := 1; workerID <= MAX_JOBS; workerID++ {
 		go worker(ctx, workerID, docsChan, resultsChan)
 	}
@@ -215,8 +214,10 @@ func main() {
 		docsChan <- docs
 	}
 
+	finished := 0
 	for i := 0; i < totalJobs; i++ {
-		<-resultsChan
+		finished += <-resultsChan
+		log.Printf("[info] finished %.2f%% of all\n", 100*float64(finished)/float64(count))
 	}
 	close(docsChan)
 	close(resultsChan)
@@ -236,12 +237,11 @@ func main() {
 	}
 }
 
-func worker(ctx context.Context, id int, docsChan chan []interface{}, results chan<- struct{}) {
+func worker(ctx context.Context, id int, docsChan chan []interface{}, results chan<- int) {
 	for docs := range docsChan {
-		fmt.Println("[info] worker", id, "started")
 		if len(docs) <= 0 {
-			fmt.Println("worker", id, "finished with nothing to do")
-			results <- EmptyStruct
+			fmt.Println("[info] worker", id, "finished with nothing to do")
+			results <- 0
 			continue
 		}
 		err := insertUTXOToMongo(ctx, docs)
@@ -250,8 +250,7 @@ func worker(ctx context.Context, id int, docsChan chan []interface{}, results ch
 			docsChan <- docs // if failed, put the docs back to the channel
 			continue
 		}
-		fmt.Println("worker", id, "successfully finished an insert-many task")
-		results <- EmptyStruct
+		results <- len(docs)
 	}
 }
 
