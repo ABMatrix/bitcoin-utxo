@@ -28,7 +28,7 @@ import (
 
 // Version
 const (
-	Version                     = "beta-10.2"
+	Version                     = "beta-10.3"
 	ENV_MONGO_URI               = "MONGO_URI"
 	ENV_MONGO_BITCOIN_DB_NAME   = "MONGO_UTXO_DB_NAME"
 	UTXO_COLLECTION_NAME_PREFIX = "utxo"
@@ -195,6 +195,7 @@ func main() {
 				for {
 					err := insertUTXOToMongo(ctx, docs)
 					if err == nil {
+						log.Printf("[info] successfully inserted %d utxo...\n", len(docs))
 						return
 					}
 					log.Println("[error] failed to insert utxos to mongodb with error: ", err.Error())
@@ -219,6 +220,7 @@ func main() {
 			for {
 				err := insertUTXOToMongo(ctx, docs)
 				if err == nil {
+					log.Printf("[info] successfully inserted %d utxo...\n", len(docs))
 					return
 				}
 				log.Println("[error] failed to insert utxos to mongodb with error: ", err.Error())
@@ -488,7 +490,6 @@ func insertUTXOToMongo(ctx context.Context, docs []interface{}) error {
 	defer session.EndSession(ctx)
 
 	_, err = session.WithTransaction(ctx, func(sessionContext mongo.SessionContext) (interface{}, error) {
-		log.Printf("[info] inserting %d utxo...\n", len(docs))
 		return utxoCollection.InsertMany(sessionContext, docs)
 	})
 	return err
