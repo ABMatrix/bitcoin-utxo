@@ -3,18 +3,18 @@ package main
 import (
 	"context"
 	"encoding/hex"
+	"encoding/json"
 	"flag"
 	"fmt"
+	"io/ioutil"
 	"log"
 	"math"
 	"os"
 	"os/signal"
+	"path"
 	"strings"
 	"sync"
 	"syscall"
-	"time"
-
-	"go.mongodb.org/mongo-driver/x/mongo/driver"
 
 	"go.mongodb.org/mongo-driver/mongo/writeconcern"
 
@@ -31,18 +31,20 @@ import (
 
 // Version
 const (
-	Version                     = "beta-10.12"
+	Version                     = "beta-10.13"
 	ENV_MONGO_URI               = "MONGO_URI"
 	ENV_MONGO_BITCOIN_DB_NAME   = "MONGO_UTXO_DB_NAME"
 	UTXO_COLLECTION_NAME_PREFIX = "utxo"
 	BATCH_SIZE                  = 1 << 13
 	MAX_JOBS                    = 8
+	PATH_FOR_FAILED_PREFIX      = "/root/bitcoin-failed"
 )
 
 var (
 	mongoCli       *mongo.Client
 	utxoCollection *mongo.Collection
 	maxJobs        int
+	pathForFailed  string
 )
 
 func main() {
@@ -69,9 +71,18 @@ func main() {
 	// Mainnet or Testnet (for encoding addresses correctly)
 	testnet := false
 	utxoCollectionName := UTXO_COLLECTION_NAME_PREFIX + "-mainnet"
+	pathForFailed = PATH_FOR_FAILED_PREFIX + "-mainnet"
 	if *testnetFlag || strings.Contains(*chainstate, "testnet") { // check testnet flag
 		testnet = true
 		utxoCollectionName = UTXO_COLLECTION_NAME_PREFIX + "-testnet"
+		pathForFailed = PATH_FOR_FAILED_PREFIX + "-testnet"
+	}
+
+	if _, err := os.Stat(pathForFailed); os.IsNotExist(err) {
+		err = os.Mkdir(pathForFailed, os.ModePerm)
+		if err != nil {
+			log.Fatalln("[fatal] failed to create", pathForFailed, "with error:", err.Error())
+		}
 	}
 
 	// Select bitcoin chainstate leveldb folder
@@ -237,6 +248,8 @@ func main() {
 	close(docsChan)
 	close(resultsChan)
 
+	processFailed(ctx)
+
 	// Final Report
 	// ---------------------
 	log.Printf("[summary] Total entries in leveldb: %d\n", entries)
@@ -262,15 +275,24 @@ func worker(ctx context.Context, id int, docsChan chan []interface{}, results ch
 		err := insertUTXOToMongo(ctx, docs)
 		if err != nil {
 			log.Printf("[error] worker %d failed to insert many with error: %s\n", id, err.Error())
-			if tt, ok := err.(driver.Error); ok && (tt.HasErrorLabel(driver.TransientTransactionError) || tt.HasErrorLabel(driver.UnknownTransactionCommitResult)) {
-				// with these 2 errors the transaction will be retried automatically
-				time.Sleep(2 * time.Minute)
-				log.Printf("[info] worker %d will retry", id)
-				results <- 1
-				continue
+			// write to a json file
+			filename := fmt.Sprintf("%d-%s.json", id, docs[0].(*UTXO).ID)
+			filepath := path.Join(pathForFailed, filename)
+			file, err := os.Create(filepath)
+			if err != nil {
+				log.Println("[fatal] failed to create", filepath, "with error:", err.Error(), " now quitting")
+				syscall.Kill(os.Getpid(), syscall.SIGTERM)
+				return
 			}
-			docsChan <- docs // for any other failures, put the docs back to the channel and retry
-			continue
+			log.Println("[info] start to write uninserted documents to", filepath)
+			err = json.NewEncoder(file).Encode(docs)
+			if err != nil {
+				file.Close()
+				log.Println("[fatal] failed to encode with error:", err.Error(), " now quitting")
+				syscall.Kill(os.Getpid(), syscall.SIGTERM)
+				return
+			}
+			file.Close()
 		}
 		results <- 1
 	}
@@ -522,4 +544,43 @@ func insertUTXOToMongo(ctx context.Context, docs []interface{}) error {
 		return utxoCollection.InsertMany(sessionContext, docs)
 	})
 	return err
+}
+
+func processFailed(ctx context.Context) {
+	fileInfos, err := ioutil.ReadDir(pathForFailed)
+	if err != nil {
+		log.Println("[fatal] failed to read directory", pathForFailed, "with error:", err.Error(), " now quitting")
+		syscall.Kill(os.Getpid(), syscall.SIGTERM)
+		return
+	}
+	log.Println("[info] total failed:", len(fileInfos))
+	for _, fi := range fileInfos {
+		filepath := path.Join(pathForFailed, fi.Name())
+		file, err := os.Open(filepath)
+		if err != nil {
+			log.Println("[fatal] failed to open file", filepath, "with error:", err.Error(), " now quitting")
+			syscall.Kill(os.Getpid(), syscall.SIGTERM)
+			return
+		}
+		var utxos []*UTXO
+		if err = json.NewDecoder(file).Decode(&utxos); err != nil {
+			file.Close()
+			log.Println("[fatal] failed to decode", filepath, "with error:", err.Error(), " now quitting")
+			syscall.Kill(os.Getpid(), syscall.SIGTERM)
+			return
+		}
+		docs := make([]interface{}, len(utxos))
+		for index, utxo := range utxos {
+			docs[index] = utxo
+		}
+		if err = insertUTXOToMongo(ctx, docs); err != nil {
+			file.Close()
+			log.Println("[fatal] failed to insert again with error:", err.Error(), " now quitting")
+			syscall.Kill(os.Getpid(), syscall.SIGTERM)
+			return
+		}
+		file.Close()
+		os.Remove(filepath)
+	}
+	log.Println("[info] successfully finished processing all failed")
 }
