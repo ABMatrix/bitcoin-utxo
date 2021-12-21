@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"syscall"
 
 	"go.mongodb.org/mongo-driver/mongo/writeconcern"
@@ -27,7 +28,7 @@ import (
 
 // Version
 const (
-	Version                     = "beta-10.7"
+	Version                     = "beta-10.8"
 	ENV_MONGO_URI               = "MONGO_URI"
 	ENV_MONGO_BITCOIN_DB_NAME   = "MONGO_UTXO_DB_NAME"
 	UTXO_COLLECTION_NAME_PREFIX = "utxo"
@@ -171,6 +172,16 @@ func main() {
 	for workerID := 1; workerID <= MAX_JOBS; workerID++ {
 		go worker(ctx, workerID, docsChan, resultsChan)
 	}
+	wg := &sync.WaitGroup{}
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		finished := 0
+		for i := 0; i < totalJobs; i++ {
+			finished += <-resultsChan
+			log.Printf("[info] finished %.2f%% of all\n", 100*float64(finished)/float64(count))
+		}
+	}()
 	var entries int64
 	for ok := iter.Seek([]byte{0x43}); ok; ok = iter.Next() {
 		if entries > 0 && entries%BATCH_SIZE == 0 {
@@ -214,11 +225,7 @@ func main() {
 		docsChan <- docs
 	}
 
-	finished := 0
-	for i := 0; i < totalJobs; i++ {
-		finished += <-resultsChan
-		log.Printf("[info] finished %.2f%% of all\n", 100*float64(finished)/float64(count))
-	}
+	wg.Wait()
 	close(docsChan)
 	close(resultsChan)
 
