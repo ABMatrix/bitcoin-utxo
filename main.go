@@ -31,7 +31,7 @@ import (
 
 // Version
 const (
-	Version                     = "beta-10.10"
+	Version                     = "beta-10.11"
 	ENV_MONGO_URI               = "MONGO_URI"
 	ENV_MONGO_BITCOIN_DB_NAME   = "MONGO_UTXO_DB_NAME"
 	UTXO_COLLECTION_NAME_PREFIX = "utxo"
@@ -42,6 +42,7 @@ const (
 var (
 	mongoCli       *mongo.Client
 	utxoCollection *mongo.Collection
+	maxJobs        int
 )
 
 func main() {
@@ -52,6 +53,7 @@ func main() {
 	chainstate := flag.String("db", defaultFolder, "Location of bitcoin chainstate db.") // chainstate folder
 	testnetFlag := flag.Bool("testnet", false, "Is the chainstate leveldb for testnet?") // true/false
 	version := flag.Bool("version", false, "Print version.")
+	jobs := flag.Int("max-jobs", MAX_JOBS, "the maximum concurrent jobs")
 	flag.Parse() // execute command line parsing for all declared flags
 
 	// Show Version
@@ -59,6 +61,8 @@ func main() {
 		log.Println(Version)
 		os.Exit(0)
 	}
+
+	maxJobs = *jobs
 
 	ctx := context.Background()
 
@@ -165,7 +169,7 @@ func main() {
 
 	var count int64
 	var utxoBuf []*UTXO
-	docsChan := make(chan []interface{}, MAX_JOBS)
+	docsChan := make(chan []interface{}, maxJobs)
 	totalJobs := 0
 	for ok := iter.Seek([]byte{0x43}); ok; ok = iter.Next() {
 		totalJobs++
@@ -173,7 +177,7 @@ func main() {
 	totalJobs = int(math.Ceil(float64(totalJobs) / float64(BATCH_SIZE)))
 	log.Println("[info] finished pre-scan of leveldb; total jobs:", totalJobs)
 	resultsChan := make(chan int, totalJobs)
-	for workerID := 1; workerID <= MAX_JOBS; workerID++ {
+	for workerID := 1; workerID <= maxJobs; workerID++ {
 		go worker(ctx, workerID, docsChan, resultsChan)
 	}
 	wg := &sync.WaitGroup{}
