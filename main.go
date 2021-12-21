@@ -28,7 +28,7 @@ import (
 
 // Version
 const (
-	Version                     = "beta-10.8"
+	Version                     = "beta-10.9"
 	ENV_MONGO_URI               = "MONGO_URI"
 	ENV_MONGO_BITCOIN_DB_NAME   = "MONGO_UTXO_DB_NAME"
 	UTXO_COLLECTION_NAME_PREFIX = "utxo"
@@ -180,7 +180,7 @@ func main() {
 		finished := 0
 		for i := 0; i < totalJobs; i++ {
 			finished += <-resultsChan
-			log.Printf("[info] finished %.2f%% of all\n", 100*float64(finished)/float64(count))
+			log.Printf("[info] finished %.2f%% of all\n", 100*float64(finished)/float64(totalJobs))
 		}
 	}()
 	var entries int64
@@ -249,7 +249,7 @@ func worker(ctx context.Context, id int, docsChan chan []interface{}, results ch
 	for docs := range docsChan {
 		if len(docs) <= 0 {
 			fmt.Println("[info] worker", id, "finished with nothing to do")
-			results <- 0
+			results <- 1
 			continue
 		}
 		err := insertUTXOToMongo(ctx, docs)
@@ -258,7 +258,7 @@ func worker(ctx context.Context, id int, docsChan chan []interface{}, results ch
 			docsChan <- docs // if failed, put the docs back to the channel
 			continue
 		}
-		results <- len(docs)
+		results <- 1
 	}
 }
 
