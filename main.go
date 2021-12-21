@@ -168,6 +168,7 @@ func main() {
 		totalJobs++
 	}
 	totalJobs = int(math.Ceil(float64(totalJobs) / float64(BATCH_SIZE)))
+	log.Println("[info] finished pre-scan of leveldb; total jobs:", totalJobs)
 	resultsChan := make(chan int, totalJobs)
 	for workerID := 1; workerID <= MAX_JOBS; workerID++ {
 		go worker(ctx, workerID, docsChan, resultsChan)
