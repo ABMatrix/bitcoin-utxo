@@ -31,11 +31,11 @@ import (
 
 // Version
 const (
-	Version                     = "beta-10.11"
+	Version                     = "beta-10.12"
 	ENV_MONGO_URI               = "MONGO_URI"
 	ENV_MONGO_BITCOIN_DB_NAME   = "MONGO_UTXO_DB_NAME"
 	UTXO_COLLECTION_NAME_PREFIX = "utxo"
-	BATCH_SIZE                  = 1 << 15
+	BATCH_SIZE                  = 1 << 13
 	MAX_JOBS                    = 8
 )
 
