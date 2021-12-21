@@ -12,6 +12,9 @@ import (
 	"strings"
 	"sync"
 	"syscall"
+	"time"
+
+	"go.mongodb.org/mongo-driver/x/mongo/driver"
 
 	"go.mongodb.org/mongo-driver/mongo/writeconcern"
 
@@ -28,7 +31,7 @@ import (
 
 // Version
 const (
-	Version                     = "beta-10.9"
+	Version                     = "beta-10.10"
 	ENV_MONGO_URI               = "MONGO_URI"
 	ENV_MONGO_BITCOIN_DB_NAME   = "MONGO_UTXO_DB_NAME"
 	UTXO_COLLECTION_NAME_PREFIX = "utxo"
@@ -255,7 +258,14 @@ func worker(ctx context.Context, id int, docsChan chan []interface{}, results ch
 		err := insertUTXOToMongo(ctx, docs)
 		if err != nil {
 			log.Printf("[error] worker %d failed to insert many with error: %s\n", id, err.Error())
-			docsChan <- docs // if failed, put the docs back to the channel
+			if tt, ok := err.(driver.Error); ok && (tt.HasErrorLabel(driver.TransientTransactionError) || tt.HasErrorLabel(driver.UnknownTransactionCommitResult)) {
+				// with these 2 errors the transaction will be retried automatically
+				time.Sleep(2 * time.Minute)
+				log.Printf("[info] worker %d will retry", id)
+				results <- 1
+				continue
+			}
+			docsChan <- docs // for any other failures, put the docs back to the channel and retry
 			continue
 		}
 		results <- 1
