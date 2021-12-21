@@ -180,7 +180,7 @@ func main() {
 		finished := 0
 		for i := 0; i < totalJobs; i++ {
 			finished += <-resultsChan
-			log.Printf("[info] finished %.2f%% of all\n", 100*float64(finished)/float64(totalJobs))
+			log.Printf("[info] finished %d/%d\n", finished, totalJobs)
 		}
 	}()
 	var entries int64
