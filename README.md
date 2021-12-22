@@ -58,30 +58,32 @@ You **must** set the 2 environment variables prior to running the `bitcoin-utxo`
 If you know that the `chainstate` LevelDB folder is in a different location to the default (e.g. you want to get a UTXO dump of the _Testnet_ blockchain), use the `-db` option:
 
 ```
-$ bitcoin-utxo-dump  --db /home/bitcoin/.bitcoin/testnet3/chainstate/ --testnet
+$ bitcoin-utxo  --db /home/bitcoin/.bitcoin/testnet3/chainstate/ --testnet
 ```
 
-By default this script does not convert the public keys inside P2PK locking scripts to addresses (because technically they do not have an address). However, sometimes it may be useful to get addresses for them anyway for use with other APIs, so the following option allows you to return the "address" for UTXOs with P2PK locking scripts:
+If you want to set a different number of maximum concurrent jobs, use the `max-jobs` option.
+The default is 8.
 
-```
-$ bitcoin-utxo -p2pkaddresses
-```
+If you want to process failed only transactions which is stored under the `/root/bitcoin-failed-<network>` folder,
+provide the `failed` flag which is by default `false`.
+
 
 ### Fields for each mongodb document
+* **id** - the unique ID consists of txid and vout.
 * **txid** - [Transaction ID](http://learnmeabitcoin.com/glossary/txid) for the output.
 * **vout** - The index number of the transaction output (which output in the transaction is it?).
 * **height** - The height of the block the transaction was mined in.
 * **coinbase** - Whether the output is from a coinbase transaction (i.e. claiming a block reward).
 * **amount** - The value of the output in _satoshis_.
 * **script** - The locking script placed on the output (this is just the hash160 public key or hash160 script for a P2PK, P2PKH, or P2SH)
-* **type** - The type of locking script (e.g. P2PK, P2PKH, P2SH, P2MS, P2WPKH, P2WSH, or non-standard)
+* **type** - The type of locking script (e.g. pubkey, pubkeyhash, scripthash, multisig, witness_v0_pubkeyhash, witness_v0_scripthash, witness_v1_taproot, witness_unknown or nonstandard)
 * **address** - The address the output is locked to (this is generally just the locking script in a shorter format with user-friendly characters).
 
 
 All other options can be found with `-h`:
 
 ```
-$ bitcoin-utxo-dump -h
+$ bitcoin-utxo -h
 ```
 
 ## FAQ
@@ -96,7 +98,7 @@ Either way, I'd probably make a cup of tea after it starts running.
 
 ### How big is the file?
 
-The resultant mongodb size should be around **7GB** (roughly **2.5 times the size** of the LevelDB database: `du -h ~/.bitcoin/chainstate/`).
+The resultant mongodb size should be around **8GB** (roughly **2.5 times the size** of the LevelDB database: `du -h ~/.bitcoin/chainstate/`).
 
 ### What versions of bitcoin does this tool work with?
 
