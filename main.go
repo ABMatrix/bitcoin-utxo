@@ -34,12 +34,13 @@ import (
 
 // Version
 const (
-	Version                     = "beta-12.2.1"
+	Version  = "0.1.0"
+	MAX_JOBS = 8
+	// TODO make the following cmd options
 	ENV_MONGO_URI               = "MONGO_URI"
 	ENV_MONGO_BITCOIN_DB_NAME   = "MONGO_UTXO_DB_NAME"
 	UTXO_COLLECTION_NAME_PREFIX = "utxo"
 	BATCH_SIZE                  = 1 << 13
-	MAX_JOBS                    = 8
 	PATH_FOR_FAILED_PREFIX      = "/root/bitcoin-failed"
 )
 
