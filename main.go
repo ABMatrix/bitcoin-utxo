@@ -34,7 +34,7 @@ import (
 
 // Version
 const (
-	Version  = "0.1.0"
+	Version  = "0.1.1"
 	MAX_JOBS = 8
 	// TODO make the following cmd options
 	ENV_MONGO_URI               = "MONGO_URI"
@@ -83,6 +83,9 @@ func main() {
 		pathForFailed = PATH_FOR_FAILED_PREFIX + "-testnet"
 	}
 
+	if !*failedOnly {
+		os.RemoveAll(pathForFailed)
+	}
 	if _, err := os.Stat(pathForFailed); os.IsNotExist(err) {
 		err = os.Mkdir(pathForFailed, os.ModePerm)
 		if err != nil {
