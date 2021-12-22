@@ -33,7 +33,7 @@ import (
 
 // Version
 const (
-	Version                     = "beta-12.1"
+	Version                     = "beta-12.2"
 	ENV_MONGO_URI               = "MONGO_URI"
 	ENV_MONGO_BITCOIN_DB_NAME   = "MONGO_UTXO_DB_NAME"
 	UTXO_COLLECTION_NAME_PREFIX = "utxo"
@@ -160,14 +160,6 @@ func main() {
 	wcMajorityCollectionOpts := options.Collection().SetWriteConcern(wcMajority)
 	utxoCollection = mongoCli.Database(mongoDBName).Collection(utxoCollectionName, wcMajorityCollectionOpts)
 
-	if *failedOnly {
-		log.Println("[info] start processing all failed...")
-		processFailed(ctx)
-		iter.Release()
-		db.Close()
-		os.Exit(0)
-	}
-
 	// Catch signals that interrupt the script so that we can close the database safely (hopefully not corrupting it)
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
@@ -178,6 +170,12 @@ func main() {
 		db.Close()     // close database
 		os.Exit(0)     // exit
 	}()
+
+	if *failedOnly {
+		log.Println("[info] start processing all failed...")
+		processFailed(ctx)
+		syscall.Kill(os.Getpid(), syscall.SIGTERM)
+	}
 
 	// get obfuscate key (a byte slice)
 	if ok := iter.Seek([]byte{14}); !ok {
