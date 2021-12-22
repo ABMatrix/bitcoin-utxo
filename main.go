@@ -16,6 +16,8 @@ import (
 	"sync"
 	"syscall"
 
+	"go.mongodb.org/mongo-driver/bson"
+
 	"go.mongodb.org/mongo-driver/mongo/writeconcern"
 
 	"github.com/ABMatrix/bitcoin-utxo/bitcoin/bech32"
@@ -31,7 +33,7 @@ import (
 
 // Version
 const (
-	Version                     = "beta-11"
+	Version                     = "beta-11.1"
 	ENV_MONGO_URI               = "MONGO_URI"
 	ENV_MONGO_BITCOIN_DB_NAME   = "MONGO_UTXO_DB_NAME"
 	UTXO_COLLECTION_NAME_PREFIX = "utxo"
@@ -532,6 +534,11 @@ func processEachEntry(key []byte, value []byte, obfuscateKey []byte, testnet boo
 }
 
 func insertUTXOToMongo(ctx context.Context, docs []interface{}) error {
+	if res := utxoCollection.FindOne(ctx, bson.M{"_id": docs[0].(*UTXO).ID}); res.Err() == nil {
+		// if the first records is found then abort this task immediately
+		log.Println("[info] already done for batch starting with", docs[0].(*UTXO).ID)
+		return nil
+	}
 	session, err := mongoCli.StartSession()
 	if err != nil {
 		log.Println("[fatal] failed to start a new session with error: ", err.Error(), " now quitting")
