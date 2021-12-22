@@ -31,7 +31,7 @@ import (
 
 // Version
 const (
-	Version                     = "beta-10.13"
+	Version                     = "beta-11"
 	ENV_MONGO_URI               = "MONGO_URI"
 	ENV_MONGO_BITCOIN_DB_NAME   = "MONGO_UTXO_DB_NAME"
 	UTXO_COLLECTION_NAME_PREFIX = "utxo"
@@ -541,7 +541,10 @@ func insertUTXOToMongo(ctx context.Context, docs []interface{}) error {
 	defer session.EndSession(ctx)
 
 	_, err = session.WithTransaction(ctx, func(sessionContext mongo.SessionContext) (interface{}, error) {
-		return utxoCollection.InsertMany(sessionContext, docs)
+		if _, err := utxoCollection.InsertMany(sessionContext, docs); err != nil && !mongo.IsDuplicateKeyError(err) {
+			return nil, err
+		}
+		return nil, nil
 	})
 	return err
 }
