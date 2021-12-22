@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io/fs"
 	"io/ioutil"
 	"log"
 	"math"
@@ -573,20 +574,22 @@ func processFailed(ctx context.Context) {
 	totalFailed := len(fileInfos)
 	log.Println("[info] total failed:", totalFailed)
 	finished := 0
-	for _, fi := range fileInfos {
+	var fi fs.FileInfo
+	for len(fileInfos) > 0 {
+		fi, fileInfos = fileInfos[0], fileInfos[1:]
 		filepath := path.Join(pathForFailed, fi.Name())
 		file, err := os.Open(filepath)
 		if err != nil {
-			log.Println("[fatal] failed to open file", filepath, "with error:", err.Error(), " now quitting")
-			syscall.Kill(os.Getpid(), syscall.SIGTERM)
-			return
+			log.Println("[error] failed to open file", filepath, "with error:", err.Error())
+			fileInfos = append(fileInfos, fi)
+			continue
 		}
 		var utxos []*UTXO
 		if err = json.NewDecoder(file).Decode(&utxos); err != nil {
 			file.Close()
-			log.Println("[fatal] failed to decode", filepath, "with error:", err.Error(), " now quitting")
-			syscall.Kill(os.Getpid(), syscall.SIGTERM)
-			return
+			log.Println("[error] failed to decode", filepath, "with error:", err.Error())
+			fileInfos = append(fileInfos, fi)
+			continue
 		}
 		docs := make([]interface{}, len(utxos))
 		for index, utxo := range utxos {
@@ -594,9 +597,9 @@ func processFailed(ctx context.Context) {
 		}
 		if err = insertUTXOToMongo(ctx, docs); err != nil {
 			file.Close()
-			log.Println("[fatal] failed to insert again with error:", err.Error(), " now quitting")
-			syscall.Kill(os.Getpid(), syscall.SIGTERM)
-			return
+			log.Println("[error] failed to insert again with error:", err.Error())
+			fileInfos = append(fileInfos, fi)
+			continue
 		}
 		finished++
 		log.Println("[info] successfully finished processing", filepath)
