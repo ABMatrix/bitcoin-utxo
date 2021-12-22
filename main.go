@@ -33,7 +33,7 @@ import (
 
 // Version
 const (
-	Version                     = "beta-11.1"
+	Version                     = "beta-12"
 	ENV_MONGO_URI               = "MONGO_URI"
 	ENV_MONGO_BITCOIN_DB_NAME   = "MONGO_UTXO_DB_NAME"
 	UTXO_COLLECTION_NAME_PREFIX = "utxo"
@@ -58,6 +58,7 @@ func main() {
 	testnetFlag := flag.Bool("testnet", false, "Is the chainstate leveldb for testnet?") // true/false
 	version := flag.Bool("version", false, "Print version.")
 	jobs := flag.Int("max-jobs", MAX_JOBS, "the maximum concurrent jobs")
+	failedOnly := flag.Bool("failed", false, "process failed only")
 	flag.Parse() // execute command line parsing for all declared flags
 
 	// Show Version
@@ -159,15 +160,23 @@ func main() {
 	wcMajorityCollectionOpts := options.Collection().SetWriteConcern(wcMajority)
 	utxoCollection = mongoCli.Database(mongoDBName).Collection(utxoCollectionName, wcMajorityCollectionOpts)
 
+	if *failedOnly {
+		log.Println("[info] start processing all failed...")
+		processFailed(ctx)
+		iter.Release()
+		db.Close()
+		os.Exit(0)
+	}
+
 	// Catch signals that interrupt the script so that we can close the database safely (hopefully not corrupting it)
 	c := make(chan os.Signal, 1)
 	signal.Notify(c, os.Interrupt, syscall.SIGTERM)
 	go func() { // goroutine
 		<-c // receive from channel
 		log.Println("Interrupt signal caught. Shutting down gracefully.")
-		// iter.Release() // release database iterator
-		db.Close() // close database
-		os.Exit(0) // exit
+		iter.Release() // release database iterator
+		db.Close()     // close database
+		os.Exit(0)     // exit
 	}()
 
 	// get obfuscate key (a byte slice)
