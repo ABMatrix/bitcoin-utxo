@@ -33,7 +33,7 @@ import (
 
 // Version
 const (
-	Version                     = "beta-12"
+	Version                     = "beta-12.1"
 	ENV_MONGO_URI               = "MONGO_URI"
 	ENV_MONGO_BITCOIN_DB_NAME   = "MONGO_UTXO_DB_NAME"
 	UTXO_COLLECTION_NAME_PREFIX = "utxo"
@@ -572,7 +572,9 @@ func processFailed(ctx context.Context) {
 		syscall.Kill(os.Getpid(), syscall.SIGTERM)
 		return
 	}
-	log.Println("[info] total failed:", len(fileInfos))
+	totalFailed := len(fileInfos)
+	log.Println("[info] total failed:", totalFailed)
+	finished := 0
 	for _, fi := range fileInfos {
 		filepath := path.Join(pathForFailed, fi.Name())
 		file, err := os.Open(filepath)
@@ -598,6 +600,9 @@ func processFailed(ctx context.Context) {
 			syscall.Kill(os.Getpid(), syscall.SIGTERM)
 			return
 		}
+		finished++
+		log.Println("[info] successfully finished processing", filepath)
+		log.Printf("[info] finished processing %d/%d\n", finished, totalFailed)
 		file.Close()
 		os.Remove(filepath)
 	}
